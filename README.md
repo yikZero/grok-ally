@@ -36,10 +36,12 @@ For other local clients, use the [standard MCP configuration](docs/usage.md#manu
 
 Ask your agent: **“Use Grok Bridge to give me a second opinion on this design.”** Then ask a follow-up in the same Grok conversation.
 
+For code review, ask **“Use Grok to review my uncommitted changes.”** The `grok-review` skill keeps the review read-only and asks for evidence, file locations, and any verification limits.
+
 | Tool | Purpose |
 | --- | --- |
 | `grok_chat` | Start or continue a conversation |
-| `grok_status` | Check or wait for a running turn |
+| `grok_status` | Check a turn, or list active and recent requests in a project |
 | `grok_cancel` | Stop a turn |
 | `grok_setup` | Check the local Grok installation |
 

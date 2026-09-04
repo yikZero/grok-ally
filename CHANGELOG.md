@@ -2,6 +2,19 @@
 
 Notable changes for users. Each release uses the notes below.
 
+## [0.2.0] - 2026-09-05
+
+Find recent Grok requests and run focused code reviews.
+
+### Added
+
+- Look up active and recent requests by project with `grok_status`, even when the request ID is missing.
+- A `grok-review` skill for read-only code and design reviews, with evidence and file locations.
+
+### Changed
+
+- Conversation guidance now keeps Grok's findings and uncertainty distinct from the host's conclusions.
+
 ## [0.1.1] - 2026-09-05
 
 Reliability fixes for shutdown and cancellation.

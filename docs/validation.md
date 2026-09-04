@@ -2,13 +2,19 @@
 
 Validation date: 2026-09-05. Local machine: macOS arm64, Node 22.14.0. Grok Build: `1.0.13 (5e9a58528b76)`.
 
+## Version 0.2.0 review workflow
+
+A real MCP client started a read-only review in a fresh Git workspace containing two untracked fixture files. It recovered the request through `grok_status({ cwd })`, polled the returned ID, and found the completed request in the recent list. Grok identified the missing quantity multiplication at `cart.mjs:2`, with a concrete failing example and verification limits. Both fixture files retained their original hashes. The run completed in 117.358 seconds.
+
+This checks the review prompt and native Grok behavior through MCP. Automatic skill selection by a Codex or Claude model was not exercised. Both skills pass the skill validator; both host plugin packages pass their manifest validators.
+
 ## Version 0.1.1 review
 
 The review reproduced and fixed two lifecycle issues: descendants surviving Grok exit, and aborted status waits continuing until their deadline. Regression checks fail against 0.1.0 and pass with the fixes. Runtime and host manifest versions now come from `package.json`; release notes come from `CHANGELOG.md`.
 
 ## Automated checks
 
-All nine automated checks pass: eight use the official MCP client against the **bundled server**, with an independent fake ACP executable; one checks cancellation of a status wait directly. Run them with `npm test`. Coverage includes:
+All ten automated checks pass: nine use the official MCP client against the **bundled server**, with an independent fake ACP executable; one checks cancellation of a status wait directly. Run them with `npm test`. Coverage includes:
 
 - Schema errors, absolute workspace paths (including spaces/symlinks), separate conversations, explicit write mode, and one process/handshake for follow-up turns.
 - MCP restart and native session load, replay filtering, honest load failure, and reconnection after an idle child exits.
@@ -18,6 +24,7 @@ All nine automated checks pass: eight use the official MCP client against the **
 - Child shutdown when the MCP client disconnects.
 - Cleanup of descendants that ignore SIGTERM, on both disconnect and unexpected Grok exit.
 - Immediate cancellation of a status wait without cancelling its Grok turn; matching runtime and host manifest versions.
+- Workspace-scoped request discovery, metadata-only listings, retention of every active request, a ten-item finished list, and cancellation through a recovered ID.
 
 ## Live Grok (0.1.1)
 

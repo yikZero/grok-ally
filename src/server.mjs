@@ -38,10 +38,15 @@ server.registerTool('grok_chat', {
 }, handle((input, extra) => bridge.wait(bridge.start(input), input.waitSeconds, extra, true)));
 
 server.registerTool('grok_status', {
-  description: 'Read a turn result or wait up to 25 seconds. Repeat while starting/running/cancelling. Keep sessionId for follow-ups. Results are retained in this MCP process for the last 100 turns.',
-  inputSchema: z.object({ requestId, waitSeconds }).strict(),
+  description: 'Pass requestId to read a turn or wait up to 25 seconds; repeat while starting/running/cancelling. Pass cwd instead to immediately list all active and the 10 most recent finished requests for that exact workspace. Listings contain IDs and status, not message text. Results exist only in this MCP process; keep sessionId for follow-ups.',
+  inputSchema: z.object({ requestId: requestId.optional(),
+    cwd: z.string().min(1).optional().describe('Absolute workspace path. Use instead of requestId to find requests.'),
+    waitSeconds }).strict(),
   annotations: { readOnlyHint: true, openWorldHint: false },
-}, handle((input, extra) => bridge.wait(bridge.get(input.requestId), input.waitSeconds, extra)));
+}, handle((input, extra) => {
+  if (Boolean(input.requestId) === Boolean(input.cwd)) throw new Error('Pass either requestId or cwd, not both.');
+  return input.requestId ? bridge.wait(bridge.get(input.requestId), input.waitSeconds, extra) : bridge.list(input.cwd);
+}));
 
 server.registerTool('grok_cancel', {
   description: 'Cancel a Grok turn through ACP. Returns cancelling until Grok stops; use grok_status to confirm. Existing edits are not rolled back.',

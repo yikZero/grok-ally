@@ -1,6 +1,6 @@
 {
   "name": "@yikzero/grok-bridge",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Talk to Grok Build from Codex, Claude Code, or any local MCP client.",
   "type": "module",
   "license": "Apache-2.0",

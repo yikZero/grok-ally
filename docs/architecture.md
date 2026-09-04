@@ -34,4 +34,17 @@ Bounded request handles solve host tool deadlines without a daemon or a job data
 
 Codex and Claude package the same generated runtime with their own marketplace/manifest paths. [Codex packaging](https://developers.openai.com/plugins/build/plugins) uses a plugin-relative working directory; [Claude plugin configuration](https://code.claude.com/docs/en/plugins-reference) uses `${CLAUDE_PLUGIN_ROOT}`. Separate generated host packages avoid ambiguous default/custom MCP config merging. Installed plugins need no dependency installation.
 
-Version 0.1 focuses on text conversation. Planning, media, document generation, transcript import, workflow orchestration, and remote service hosting remain outside the bridge.
+The bridge focuses on text conversation and review. Planning, media, document generation, transcript import, workflow orchestration, and remote service hosting remain outside the bridge.
+
+## Lessons from codex-plugin-cc
+
+Reviewed OpenAI's [codex-plugin-cc](https://github.com/openai/codex-plugin-cc/tree/db52e28f4d9ded852ab3942cea316258ae4ef346) at commit `db52e28` on 2026-09-05. It exposes Claude commands, an agent, and hooks over Codex app-server. Its command count is not an MCP tool count.
+
+| Design | Application here |
+| --- | --- |
+| [Status with or without a job ID](https://github.com/openai/codex-plugin-cc/blob/db52e28f4d9ded852ab3942cea316258ae4ef346/plugins/codex/scripts/codex-companion.mjs#L883) | `grok_status` accepts an ID or an exact workspace path. It reuses the existing in-memory job map and returns bounded metadata. |
+| [Review as a focused workflow](https://github.com/openai/codex-plugin-cc/blob/db52e28f4d9ded852ab3942cea316258ae4ef346/plugins/codex/commands/review.md) | The `grok-review` skill sets a review target and read-only mode over `grok_chat`; no separate review transport or tool is needed. Untracked changes count as reviewable work. |
+| [Preserve evidence and uncertainty in results](https://github.com/openai/codex-plugin-cc/blob/db52e28f4d9ded852ab3942cea316258ae4ef346/plugins/codex/skills/codex-result-handling/SKILL.md) | Both skills distinguish Grok's assessment from host verification and preserve incomplete/failure status. Existing user authorization still controls follow-up edits. |
+| [Native runtime protocol](https://github.com/openai/codex-plugin-cc/blob/db52e28f4d9ded852ab3942cea316258ae4ef346/plugins/codex/scripts/lib/app-server.mjs#L190) | The same principle supports our MCP-to-ACP choice: reuse native sessions, configuration, and cancellation. |
+
+Its disk-backed jobs and session broker coordinate separate companion processes. Our MCP process already owns its active connections and results, so no additional broker or job store is needed for the current scope. Host transcript transfer and the optional stop-time review loop are separate workflows and are not enabled by this bridge. The four MCP tools cover chat/resume, status/results/discovery, cancellation, and setup; skills provide task-specific guidance.

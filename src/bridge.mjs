@@ -42,7 +42,8 @@ export class Bridge {
       if (!RUNNING.has(job.status)) this.jobs.delete(id);
     }
     const job = { requestId: randomUUID(), sessionId: session.sessionId || null, status: 'starting',
-      text: '', truncated: false, tools: [], session, cwd: options.cwd, write: options.write };
+      text: '', truncated: false, tools: [], session, cwd: options.cwd, write: options.write,
+      createdAt: new Date().toISOString() };
     session.busy = job;
     this.jobs.set(job.requestId, job);
     job.done = this.run(job, options.prompt);
@@ -74,6 +75,9 @@ export class Bridge {
     } finally {
       clearTimeout(timeout);
       clearTimeout(job.cancelTimer);
+      // Order finished requests by completion, including long turns that started earlier.
+      this.jobs.delete(job.requestId);
+      this.jobs.set(job.requestId, job);
       session.busy = null;
       if (this.sessions.has(session)) {
         session.idleTimer = setTimeout(() => this.drop(session), this.idleMs);
@@ -101,13 +105,21 @@ export class Bridge {
 
   get(id) {
     const job = this.jobs.get(id);
-    if (!job) throw new Error('Unknown requestId (or bridge restarted). Continue with the saved sessionId and cwd.');
+    if (!job) throw new Error('Unknown requestId. Use grok_status with cwd to find recent requests. After a bridge restart, continue with the saved sessionId and cwd.');
     return job;
+  }
+
+  list(cwd) {
+    cwd = workspace(cwd);
+    const jobs = [...this.jobs.values()].reverse().filter(job => job.cwd === cwd)
+      .map(({ requestId, sessionId, status, write, createdAt }) => ({ requestId, sessionId, status, write, createdAt }));
+    return { cwd, active: jobs.filter(job => RUNNING.has(job.status)),
+      recent: jobs.filter(job => !RUNNING.has(job.status)).slice(0, 10) };
   }
 
   snapshot(job) {
     return { requestId: job.requestId, sessionId: job.sessionId, status: job.status,
-      cwd: job.cwd, write: job.write, text: job.text, truncated: job.truncated,
+      cwd: job.cwd, write: job.write, createdAt: job.createdAt, text: job.text, truncated: job.truncated,
       tools: job.tools, ...(job.stopReason ? { stopReason: job.stopReason } : {}),
       ...(job.error ? { error: job.error } : {}) };
   }

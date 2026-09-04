@@ -63,6 +63,14 @@ A live session keeps the same `cwd`, `write`, and `maxTurns`. Omit `model` and `
 
 A slow call returns a `requestId`. Call `grok_status` with that ID until the turn finishes; it also accepts `waitSeconds` from 0 to 25.
 
+If you lose the request ID, call `grok_status` with `cwd` instead:
+
+```json
+{ "cwd": "/absolute/path/to/project" }
+```
+
+This immediately returns `active` and `recent` lists for that exact workspace in the current MCP process. All active requests and the 10 most recently finished requests are included, with recent results ordered by completion. Entries contain request/session IDs, status, write mode, and `createdAt`; message text and tool output are omitted. Use a returned `requestId` to read the result or cancel that request. Supply exactly one of `requestId` or `cwd`; `waitSeconds` only applies to individual requests. A bridge restart clears the lists.
+
 | Status | Meaning |
 | --- | --- |
 | `starting`, `running`, `cancelling` | Still in progress |

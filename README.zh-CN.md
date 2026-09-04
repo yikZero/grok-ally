@@ -36,10 +36,12 @@ claude plugin install grok-bridge@grok-bridge
 
 直接对当前助手说：**“用 Grok Bridge 帮我分析这个设计。”** 然后继续追问即可。
 
+审查代码时，可以说：**“用 Grok 审查我尚未提交的改动。”** `grok-review` skill 会以只读方式审查，并要求给出证据、代码位置和验证范围。
+
 | 工具 | 用途 |
 | --- | --- |
 | `grok_chat` | 开始或继续对话 |
-| `grok_status` | 查询或等待运行结果 |
+| `grok_status` | 查询结果，或列出项目中运行和最近结束的请求 |
 | `grok_cancel` | 取消当前请求 |
 | `grok_setup` | 检查本地 Grok 安装 |
 

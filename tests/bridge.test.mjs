@@ -101,6 +101,35 @@ test('slow turns return handles, reject overlapping prompts and cancel via ACP',
   assert.equal((await f.chat({ prompt: 'after cancel', sessionId: job.sessionId })).status, 'completed');
 });
 
+test('workspace status recovers handles, isolates projects and bounds finished results', async t => {
+  const f = await fixture(t);
+  const other = mkdtempSync(path.join(tmpdir(), 'other grok workspace '));
+  t.after(() => rmSync(other, { recursive: true, force: true }));
+  const list = async () => (await f.call('grok_status', { cwd: f.cwd })).structuredContent;
+  assert.deepEqual(await list(), { cwd: realpathSync(f.cwd), active: [], recent: [] });
+  assert.equal((await f.call('grok_status')).isError, true);
+  assert.equal((await f.call('grok_status', { cwd: '.' })).isError, true);
+  const active = await f.chat({ prompt: 'slow', waitSeconds: 0 });
+  let finished = await f.chat({ prompt: 'done' });
+  await f.chat({ cwd: other, prompt: 'unrelated private context' });
+  for (let i = 0; i < 10; i++) finished = await f.chat({ prompt: `follow-up ${i}`, sessionId: finished.sessionId });
+  const listing = await list();
+  assert.deepEqual(listing.active.map(job => job.requestId), [active.requestId]);
+  assert.equal(listing.recent.length, 10);
+  assert.equal(listing.recent[0].requestId, finished.requestId);
+  assert.ok(listing.recent.every(job => job.sessionId === finished.sessionId));
+  for (const job of [...listing.active, ...listing.recent]) {
+    assert.deepEqual(Object.keys(job).sort(), ['createdAt', 'requestId', 'sessionId', 'status', 'write']);
+    assert.ok(Number.isFinite(Date.parse(job.createdAt)));
+  }
+  assert.equal((await f.call('grok_status', { cwd: f.cwd, requestId: active.requestId })).isError, true);
+  await f.call('grok_cancel', { requestId: listing.active[0].requestId });
+  assert.equal((await f.call('grok_status', { requestId: active.requestId })).structuredContent.status, 'cancelled');
+  const afterCancel = await list();
+  assert.deepEqual(afterCancel.active, []);
+  assert.equal(afterCancel.recent[0].requestId, active.requestId);
+});
+
 test('MCP progress and cancellation reach a running Grok turn', async t => {
   const f = await fixture(t);
   const controller = new AbortController();

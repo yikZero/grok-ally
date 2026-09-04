@@ -6,6 +6,10 @@ by stdevMac (https://github.com/stdevMac/grok-in-codex) and its local
 compatibility fork. The portable runtime is a new implementation using
 the official MCP and ACP SDKs, rather than a copy of the companion runtime.
 
+Review and result-handling workflows were also informed by OpenAI's
+Apache-2.0 codex-plugin-cc (https://github.com/openai/codex-plugin-cc).
+See docs/architecture.md for the design comparison.
+
 Grok Build is developed by xAI. This project is not affiliated with or
 endorsed by xAI, OpenAI, or Anthropic. It does not redistribute Grok Build.
 Bundled dependency licenses are in plugins/grok-bridge/dist/THIRD_PARTY_LICENSES.txt.
