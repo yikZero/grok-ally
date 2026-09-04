@@ -2,6 +2,20 @@
 
 Notable changes for users. Each release uses the notes below.
 
+## [0.3.0] - 2026-09-05
+
+Grok Bridge is now Grok Ally.
+
+### Changed
+
+- Plugin, marketplace, MCP server, and command names are now `grok-ally`.
+- The package name is now `grok-ally`, without an npm scope. Release archives use `grok-ally-<version>.tgz`.
+
+### Upgrade
+
+- Replace the old plugin with `grok-ally@grok-ally`; see the [migration steps](https://github.com/yikZero/grok-ally/blob/v0.3.0/docs/usage.md#upgrade-from-grok-bridge).
+- Existing Grok session IDs and the four `grok_*` tools continue to work.
+
 ## [0.2.0] - 2026-09-05
 
 Find recent Grok requests and run focused code reviews.

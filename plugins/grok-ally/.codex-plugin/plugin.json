@@ -1,18 +1,18 @@
 {
-  "name": "grok-bridge",
-  "version": "0.2.0",
+  "name": "grok-ally",
+  "version": "0.3.0",
   "description": "Talk to Grok Build through a portable MCP to ACP bridge.",
   "author": {
     "name": "yikZero",
     "url": "https://github.com/yikZero"
   },
   "license": "Apache-2.0",
-  "homepage": "https://github.com/yikZero/grok-bridge",
-  "repository": "https://github.com/yikZero/grok-bridge",
+  "homepage": "https://github.com/yikZero/grok-ally",
+  "repository": "https://github.com/yikZero/grok-ally",
   "mcpServers": "./.mcp.json",
   "skills": "./skills/",
   "interface": {
-    "displayName": "Grok Bridge",
+    "displayName": "Grok Ally",
     "shortDescription": "Chat with Grok, keep context, follow progress, and cancel turns.",
     "longDescription": "Use your existing Grok Build login for persistent conversations from Codex. Read-only workspace access by default, explicit write mode, progress, and cancellation.",
     "developerName": "yikZero",

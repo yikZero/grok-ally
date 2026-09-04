@@ -3,7 +3,7 @@ import { chmodSync, cpSync, mkdirSync, readFileSync, writeFileSync } from 'node:
 import path from 'node:path';
 import pkg from '../package.json' with { type: 'json' };
 
-const out = 'plugins/grok-bridge/dist/server.mjs';
+const out = 'plugins/grok-ally/dist/server.mjs';
 const built = await build({ entryPoints: ['src/server.mjs'], outfile: out, bundle: true,
   platform: 'node', target: 'node22', format: 'esm', packages: 'bundle', minify: true,
   legalComments: 'eof', metafile: true,
@@ -30,16 +30,16 @@ for (const name of [...packages].sort()) {
 writeFileSync(path.join(path.dirname(out), 'THIRD_PARTY_LICENSES.txt'), notices.join('\n\n---\n\n'));
 
 // Both host packages contain exactly the same runtime; only discovery and path resolution differ.
-const claude = 'claude/grok-bridge';
+const claude = 'claude/grok-ally';
 mkdirSync(`${claude}/.claude-plugin`, { recursive: true });
-const codexManifestPath = 'plugins/grok-bridge/.codex-plugin/plugin.json';
+const codexManifestPath = 'plugins/grok-ally/.codex-plugin/plugin.json';
 const codexManifest = JSON.parse(readFileSync(codexManifestPath));
 codexManifest.version = pkg.version;
 writeFileSync(codexManifestPath, JSON.stringify(codexManifest, null, 2) + '\n');
 const { interface: _ui, skills: _skills, ...manifest } = codexManifest;
 writeFileSync(`${claude}/.claude-plugin/plugin.json`, JSON.stringify(manifest, null, 2) + '\n');
 writeFileSync(`${claude}/.mcp.json`, JSON.stringify({ mcpServers: {
-  'grok-bridge': { command: 'node', args: ['${CLAUDE_PLUGIN_ROOT}/dist/server.mjs'] },
+  'grok-ally': { command: 'node', args: ['${CLAUDE_PLUGIN_ROOT}/dist/server.mjs'] },
 } }, null, 2) + '\n');
-cpSync('plugins/grok-bridge/dist', `${claude}/dist`, { recursive: true });
-cpSync('plugins/grok-bridge/skills', `${claude}/skills`, { recursive: true });
+cpSync('plugins/grok-ally/dist', `${claude}/dist`, { recursive: true });
+cpSync('plugins/grok-ally/skills', `${claude}/skills`, { recursive: true });

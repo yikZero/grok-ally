@@ -1,19 +1,19 @@
 {
-  "name": "@yikzero/grok-bridge",
-  "version": "0.2.0",
+  "name": "grok-ally",
+  "version": "0.3.0",
   "description": "Talk to Grok Build from Codex, Claude Code, or any local MCP client.",
   "type": "module",
   "license": "Apache-2.0",
   "author": "yikZero",
   "repository": {
     "type": "git",
-    "url": "https://github.com/yikZero/grok-bridge.git"
+    "url": "https://github.com/yikZero/grok-ally.git"
   },
   "engines": {
     "node": ">=22"
   },
   "bin": {
-    "grok-bridge": "plugins/grok-bridge/dist/server.mjs"
+    "grok-ally": "plugins/grok-ally/dist/server.mjs"
   },
   "files": [
     "plugins/",
@@ -27,7 +27,7 @@
   ],
   "scripts": {
     "build": "node scripts/build.mjs",
-    "start": "node plugins/grok-bridge/dist/server.mjs",
+    "start": "node plugins/grok-ally/dist/server.mjs",
     "test": "node --test tests/*.test.mjs",
     "release:notes": "node scripts/release-notes.mjs"
   },

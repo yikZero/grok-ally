@@ -1,14 +1,40 @@
 # Usage reference
 
+## Upgrade from Grok Bridge
+
+Version 0.3.0 renames the plugin and marketplace to `grok-ally`. Finish any running turn, then use the commands for your host.
+
+Codex:
+
+```bash
+codex plugin remove grok-bridge@grok-bridge
+codex plugin marketplace remove grok-bridge
+codex plugin marketplace add yikZero/grok-ally
+codex plugin add grok-ally@grok-ally
+```
+
+Claude Code:
+
+```bash
+claude plugin uninstall grok-bridge@grok-bridge
+claude plugin marketplace remove grok-bridge
+claude plugin marketplace add yikZero/grok-ally
+claude plugin install grok-ally@grok-ally
+```
+
+Start a new Codex task or restart Claude Code. Native Grok conversations remain available with their existing session IDs and original workspace paths; request IDs are local to the old MCP process. The four `grok_*` tools keep the same names and arguments.
+
+For a manual MCP installation, replace the old registration with the configuration below and update the executable path. The package and command names are now `grok-ally`.
+
 ## Manual MCP installation
 
 Plugin users can skip this section. Use either the plugin or a manual MCP registration in each host to avoid duplicate tools.
 
-Clone the repository, or download and extract an archive from [Releases](https://github.com/yikZero/grok-bridge/releases). The runtime is prebuilt:
+Clone the repository, or download and extract an archive from [Releases](https://github.com/yikZero/grok-ally/releases). The runtime is prebuilt:
 
 ```bash
-git clone https://github.com/yikZero/grok-bridge.git
-node grok-bridge/plugins/grok-bridge/dist/server.mjs --check
+git clone https://github.com/yikZero/grok-ally.git
+node grok-ally/plugins/grok-ally/dist/server.mjs --check
 ```
 
 Register this stdio server in your client, replacing the absolute path:
@@ -16,19 +42,19 @@ Register this stdio server in your client, replacing the absolute path:
 ```json
 {
   "mcpServers": {
-    "grok-bridge": {
+    "grok-ally": {
       "command": "node",
-      "args": ["/absolute/path/grok-bridge/plugins/grok-bridge/dist/server.mjs"]
+      "args": ["/absolute/path/grok-ally/plugins/grok-ally/dist/server.mjs"]
     }
   }
 }
 ```
 
-For the `.tgz` release asset, the extracted root is `package/`; use its `plugins/grok-bridge/dist/server.mjs`. The equivalent CLI registrations are:
+For the `.tgz` release asset, the extracted root is `package/`; use its `plugins/grok-ally/dist/server.mjs`. The equivalent CLI registrations are:
 
 ```bash
-codex mcp add grok-bridge -- node /absolute/path/grok-bridge/plugins/grok-bridge/dist/server.mjs
-claude mcp add --transport stdio grok-bridge -- node /absolute/path/grok-bridge/plugins/grok-bridge/dist/server.mjs
+codex mcp add grok-ally -- node /absolute/path/grok-ally/plugins/grok-ally/dist/server.mjs
+claude mcp add --transport stdio grok-ally -- node /absolute/path/grok-ally/plugins/grok-ally/dist/server.mjs
 ```
 
 Claude Desktop accepts local stdio MCP configuration. The Claude.ai website cannot directly start a local process. Native Windows has not been validated; use WSL.

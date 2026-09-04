@@ -53,13 +53,13 @@ export class GrokSession {
     args.push('stdio');
     this.child = spawn(binary(), args, {
       cwd: options.cwd,
-      env: { ...process.env, GROK_DISABLE_AUTOUPDATER: '1', GROK_BRIDGE_ACTIVE: '1', NO_COLOR: '1', RUST_LOG: 'off' },
+      env: { ...process.env, GROK_DISABLE_AUTOUPDATER: '1', GROK_ALLY_ACTIVE: '1', NO_COLOR: '1', RUST_LOG: 'off' },
       detached: process.platform !== 'win32',
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     this.stderr = '';
     this.child.stderr.on('data', data => { this.stderr = (this.stderr + data).slice(-4000); });
-    this.connection = client({ name: 'grok-bridge', version: pkg.version })
+    this.connection = client({ name: 'grok-ally', version: pkg.version })
       .onRequest('session/request_permission', () => ({ outcome: { outcome: 'cancelled' } }))
       .onNotification('session/update', ({ params }) => {
         // Ignore session/load replay and notifications belonging to another session.
@@ -78,7 +78,7 @@ export class GrokSession {
     const timer = setTimeout(() => this.close(new Error('Grok startup timed out. Check grok login and grok doctor.')), 60000);
     try {
       const init = await this.connection.agent.request('initialize', {
-        protocolVersion: 1, clientCapabilities: {}, clientInfo: { name: 'grok-bridge', version: pkg.version },
+        protocolVersion: 1, clientCapabilities: {}, clientInfo: { name: 'grok-ally', version: pkg.version },
       });
       if (init.protocolVersion !== 1) throw new Error('Grok did not negotiate ACP v1.');
       const params = { cwd: this.options.cwd, mcpServers: [] };

@@ -1,14 +1,14 @@
 {
-  "name": "grok-bridge",
+  "name": "grok-ally",
   "interface": {
-    "displayName": "Grok Bridge"
+    "displayName": "Grok Ally"
   },
   "plugins": [
     {
-      "name": "grok-bridge",
+      "name": "grok-ally",
       "source": {
         "source": "local",
-        "path": "./plugins/grok-bridge"
+        "path": "./plugins/grok-ally"
       },
       "policy": {
         "installation": "AVAILABLE",

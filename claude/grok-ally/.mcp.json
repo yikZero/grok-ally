@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "grok-bridge": {
+    "grok-ally": {
       "command": "node",
       "args": [
         "${CLAUDE_PLUGIN_ROOT}/dist/server.mjs"

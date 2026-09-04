@@ -2,6 +2,12 @@
 
 Validation date: 2026-09-05. Local machine: macOS arm64, Node 22.14.0. Grok Build: `1.0.13 (5e9a58528b76)`.
 
+## Version 0.3.0 rename
+
+All ten automated checks pass with the renamed bundles. The MCP handshake identifies `grok-ally` at `0.3.0`; Codex and Claude plugin/marketplace validators pass, and packaging produces `grok-ally-0.3.0.tgz` directly.
+
+The local Codex installation was migrated from `grok-bridge@grok-bridge` to `grok-ally@grok-ally` and reports enabled. An official MCP client launched its installed configuration and received `ALLY_OK` from the real Grok runtime in 5.574 seconds. The installed bundle matches the source bundle, and a recursive launch with `GROK_ALLY_ACTIVE=1` exits before starting a session.
+
 ## Version 0.2.0 review workflow
 
 A real MCP client started a read-only review in a fresh Git workspace containing two untracked fixture files. It recovered the request through `grok_status({ cwd })`, polled the returned ID, and found the completed request in the recent list. Grok identified the missing quantity multiplication at `cart.mjs:2`, with a concrete failing example and verification limits. Both fixture files retained their original hashes. The run completed in 117.358 seconds.
@@ -52,4 +58,4 @@ These timings are individual smoke-test observations, not comparative benchmarks
 
 Claude Code's authenticated model/tool-selection loop and Claude Desktop UI were not exercised. Claude validation and the official MCP client establish packaging/protocol evidence, not an end-to-end UI claim. Native Windows is not validated; use WSL.
 
-The repository's [GitHub Actions workflow](https://github.com/yikZero/grok-bridge/actions) runs the mock integration checks and bundle-rebuild comparison on both Ubuntu and macOS. Real provider smoke tests are intentionally not run in public CI.
+The repository's [GitHub Actions workflow](https://github.com/yikZero/grok-ally/actions) runs the mock integration checks and bundle-rebuild comparison on both Ubuntu and macOS. Real provider smoke tests are intentionally not run in public CI.

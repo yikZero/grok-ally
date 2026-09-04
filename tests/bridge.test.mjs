@@ -15,11 +15,11 @@ const fake = path.join(root, 'tests/fake-grok.mjs');
 chmodSync(fake, 0o755);
 
 async function fixture(t, previous) {
-  const cwd = previous?.cwd || mkdtempSync(path.join(tmpdir(), 'grok bridge '));
+  const cwd = previous?.cwd || mkdtempSync(path.join(tmpdir(), 'grok ally '));
   if (!previous) t.after(() => rmSync(cwd, { recursive: true, force: true }));
   const log = path.join(cwd, 'events.jsonl');
   const transport = new StdioClientTransport({ command: process.execPath,
-    args: [path.join(root, 'plugins/grok-bridge/dist/server.mjs')],
+    args: [path.join(root, 'plugins/grok-ally/dist/server.mjs')],
     env: { ...process.env, GROK_BINARY: fake, GROK_TEST_LOG: log }, stderr: 'pipe', cwd });
   let stderr = '';
   transport.stderr?.on('data', data => { stderr += data; });
@@ -34,8 +34,8 @@ async function fixture(t, previous) {
 
 test('official MCP client: schemas, same-process conversation, defaults and isolated sessions', async t => {
   const f = await fixture(t);
-  assert.equal(f.client.getServerVersion().version, pkg.version);
-  for (const file of ['plugins/grok-bridge/.codex-plugin/plugin.json', 'claude/grok-bridge/.claude-plugin/plugin.json']) {
+  assert.deepEqual(f.client.getServerVersion(), { name: pkg.name, version: pkg.version });
+  for (const file of ['plugins/grok-ally/.codex-plugin/plugin.json', 'claude/grok-ally/.claude-plugin/plugin.json']) {
     assert.equal(JSON.parse(readFileSync(path.join(root, file), 'utf8')).version, pkg.version);
   }
   assert.deepEqual((await f.client.listTools()).tools.map(t => t.name), ['grok_chat', 'grok_status', 'grok_cancel', 'grok_setup']);

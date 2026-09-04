@@ -1,6 +1,6 @@
 ---
 name: grok-review
-description: Use when the user asks Grok to review code, check a diff, or challenge an implementation or design. Provides a read-only review through Grok Bridge.
+description: Use when the user asks Grok to review code, check a diff, or challenge an implementation or design. Provides a read-only review through Grok Ally.
 ---
 
 Use the plugin's `grok_chat` tool with `write=false`, the user's absolute project `cwd`, and no `sessionId` for a new review. This avoids continuing a write-capable conversation. Follow-up questions may reuse that review's session ID.

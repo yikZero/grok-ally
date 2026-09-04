@@ -1,0 +1,5 @@
+{
+  "mcpServers": {
+    "grok-ally": { "command": "node", "args": ["./dist/server.mjs"], "cwd": "." }
+  }
+}

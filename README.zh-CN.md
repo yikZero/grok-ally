@@ -1,11 +1,13 @@
-# Grok Bridge
+# Grok Ally
 
 在 **Codex、Claude Code 或其他本地 MCP 客户端**里与 Grok Build 交流，复用已有的 Grok 登录。支持多轮对话、恢复会话和取消请求。
 
 [English](README.md) · [使用参考](docs/usage.md) · [更新记录](CHANGELOG.md)
 
+原名 Grok Bridge。从 0.2.x 或更早版本升级，请按[迁移步骤](docs/usage.md#upgrade-from-grok-bridge)重新安装。
+
 ```text
-Codex / Claude → MCP → Grok Bridge → ACP → Grok Build
+Codex / Claude → MCP → Grok Ally → ACP → Grok Build
 ```
 
 ## 安装
@@ -15,8 +17,8 @@ Codex / Claude → MCP → Grok Bridge → ACP → Grok Build
 ### Codex
 
 ```bash
-codex plugin marketplace add yikZero/grok-bridge
-codex plugin add grok-bridge@grok-bridge
+codex plugin marketplace add yikZero/grok-ally
+codex plugin add grok-ally@grok-ally
 ```
 
 安装后新建一个 Codex 任务。
@@ -24,8 +26,8 @@ codex plugin add grok-bridge@grok-bridge
 ### Claude Code
 
 ```bash
-claude plugin marketplace add yikZero/grok-bridge
-claude plugin install grok-bridge@grok-bridge
+claude plugin marketplace add yikZero/grok-ally
+claude plugin install grok-ally@grok-ally
 ```
 
 安装后重启 Claude Code，也可以在交互界面中使用 `/plugin` 命令。
@@ -34,7 +36,7 @@ claude plugin install grok-bridge@grok-bridge
 
 ## 使用
 
-直接对当前助手说：**“用 Grok Bridge 帮我分析这个设计。”** 然后继续追问即可。
+直接对当前助手说：**“用 Grok Ally 帮我分析这个设计。”** 然后继续追问即可。
 
 审查代码时，可以说：**“用 Grok 审查我尚未提交的改动。”** `grok-review` skill 会以只读方式审查，并要求给出证据、代码位置和验证范围。
 

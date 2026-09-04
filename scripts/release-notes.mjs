@@ -9,6 +9,6 @@ const section = sections[index];
 const body = section.slice(section.indexOf('\n') + 1).trim();
 if (!body) throw new Error(`Empty CHANGELOG entry for ${version}`);
 const previous = sections[index + 1]?.match(/^\[([^\]]+)\]/)?.[1];
-const repo = 'https://github.com/yikZero/grok-bridge';
+const repo = 'https://github.com/yikZero/grok-ally';
 console.log(`${body}\n\n[Install](${repo}/tree/v${version}#install)`
   + (previous ? ` · [Full changelog](${repo}/compare/v${previous}...v${version})` : ''));
