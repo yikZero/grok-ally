@@ -1,6 +1,7 @@
 import { build } from 'esbuild';
 import { chmodSync, cpSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import pkg from '../package.json' with { type: 'json' };
 
 const out = 'plugins/grok-bridge/dist/server.mjs';
 const built = await build({ entryPoints: ['src/server.mjs'], outfile: out, bundle: true,
@@ -31,7 +32,11 @@ writeFileSync(path.join(path.dirname(out), 'THIRD_PARTY_LICENSES.txt'), notices.
 // Both host packages contain exactly the same runtime; only discovery and path resolution differ.
 const claude = 'claude/grok-bridge';
 mkdirSync(`${claude}/.claude-plugin`, { recursive: true });
-const { interface: _ui, skills: _skills, ...manifest } = JSON.parse(readFileSync('plugins/grok-bridge/.codex-plugin/plugin.json'));
+const codexManifestPath = 'plugins/grok-bridge/.codex-plugin/plugin.json';
+const codexManifest = JSON.parse(readFileSync(codexManifestPath));
+codexManifest.version = pkg.version;
+writeFileSync(codexManifestPath, JSON.stringify(codexManifest, null, 2) + '\n');
+const { interface: _ui, skills: _skills, ...manifest } = codexManifest;
 writeFileSync(`${claude}/.claude-plugin/plugin.json`, JSON.stringify(manifest, null, 2) + '\n');
 writeFileSync(`${claude}/.mcp.json`, JSON.stringify({ mcpServers: {
   'grok-bridge': { command: 'node', args: ['${CLAUDE_PLUGIN_ROOT}/dist/server.mjs'] },

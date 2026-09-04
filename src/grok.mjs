@@ -5,6 +5,7 @@ import path from 'node:path';
 import { Readable, Writable } from 'node:stream';
 import { promisify } from 'node:util';
 import { client, ndJsonStream } from '@agentclientprotocol/sdk';
+import pkg from '../package.json' with { type: 'json' };
 
 export function binary() {
   if (process.env.GROK_BINARY) return process.env.GROK_BINARY;
@@ -58,26 +59,26 @@ export class GrokSession {
     });
     this.stderr = '';
     this.child.stderr.on('data', data => { this.stderr = (this.stderr + data).slice(-4000); });
-    this.connection = client({ name: 'grok-bridge', version: '0.1.0' })
+    this.connection = client({ name: 'grok-bridge', version: pkg.version })
       .onRequest('session/request_permission', () => ({ outcome: { outcome: 'cancelled' } }))
       .onNotification('session/update', ({ params }) => {
         // Ignore session/load replay and notifications belonging to another session.
         if (this.prompting && params.sessionId === this.sessionId) onUpdate(params.update);
       })
       .connect(ndJsonStream(Writable.toWeb(this.child.stdin), Readable.toWeb(this.child.stdout)));
-    this.child.on('error', error => this.connection.close(new Error(safeError(error))));
-    this.child.on('close', (code, signal) => {
-      this.connection.close(new Error(`Grok exited (${code ?? signal}): ${safeError(this.stderr)}`));
+    this.child.on('error', error => this.close(new Error(safeError(error))));
+    this.child.on('exit', (code, signal) => {
+      this.close(new Error(`Grok exited (${code ?? signal}): ${safeError(this.stderr)}`));
     });
     // A child that exits early can otherwise surface an unhandled pipe error.
-    this.child.stdin.on('error', error => this.connection.close(error));
+    this.child.stdin.on('error', error => this.close(error));
   }
 
   async initialize() {
     const timer = setTimeout(() => this.close(new Error('Grok startup timed out. Check grok login and grok doctor.')), 60000);
     try {
       const init = await this.connection.agent.request('initialize', {
-        protocolVersion: 1, clientCapabilities: {}, clientInfo: { name: 'grok-bridge', version: '0.1.0' },
+        protocolVersion: 1, clientCapabilities: {}, clientInfo: { name: 'grok-bridge', version: pkg.version },
       });
       if (init.protocolVersion !== 1) throw new Error('Grok did not negotiate ACP v1.');
       const params = { cwd: this.options.cwd, mcpServers: [] };
@@ -111,14 +112,17 @@ export class GrokSession {
     this.connection.close(error);
     this.child.stdin.end();
     const kill = signal => {
+      if (!this.child.pid) return false;
       try {
         if (process.platform !== 'win32') process.kill(-this.child.pid, signal);
-        else this.child.kill(signal);
-      } catch {}
+        else return this.child.kill(signal);
+        return true;
+      } catch { return false; }
     };
-    kill('SIGTERM');
-    const timer = setTimeout(() => kill('SIGKILL'), 2000);
-    timer.unref();
-    this.child.once('close', () => clearTimeout(timer));
+    if (kill('SIGTERM')) {
+      // Keep cleanup alive even if Grok exits before its descendants do.
+      const timer = setTimeout(() => kill('SIGKILL'), 2000);
+      this.child.once('close', () => { if (!kill(0)) clearTimeout(timer); });
+    }
   }
 }

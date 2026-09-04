@@ -7,6 +7,8 @@ import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { Bridge } from '../src/bridge.mjs';
+import pkg from '../package.json' with { type: 'json' };
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const fake = path.join(root, 'tests/fake-grok.mjs');
@@ -32,6 +34,10 @@ async function fixture(t, previous) {
 
 test('official MCP client: schemas, same-process conversation, defaults and isolated sessions', async t => {
   const f = await fixture(t);
+  assert.equal(f.client.getServerVersion().version, pkg.version);
+  for (const file of ['plugins/grok-bridge/.codex-plugin/plugin.json', 'claude/grok-bridge/.claude-plugin/plugin.json']) {
+    assert.equal(JSON.parse(readFileSync(path.join(root, file), 'utf8')).version, pkg.version);
+  }
   assert.deepEqual((await f.client.listTools()).tools.map(t => t.name), ['grok_chat', 'grok_status', 'grok_cancel', 'grok_setup']);
   assert.equal((await f.call('grok_chat', { prompt: 'missing cwd' })).isError, true);
   assert.equal((await f.call('grok_chat', { cwd: f.cwd, prompt: 'x', write: 'false' })).isError, true);
@@ -44,6 +50,7 @@ test('official MCP client: schemas, same-process conversation, defaults and isol
   assert.equal(second.text, '回答:again');
   assert.equal(f.events().filter(e => e.event === 'spawn').length, 1);
   assert.equal(f.events().filter(e => e.method === 'initialize').length, 1);
+  assert.equal(f.events().find(e => e.method === 'initialize').params.clientInfo.version, pkg.version);
   assert.equal(f.events().filter(e => e.method === 'session/load').length, 0);
   const spawn = f.events()[0];
   assert.equal(spawn.cwd, realpathSync(f.cwd));
@@ -132,4 +139,33 @@ test('closing the MCP client terminates its Grok process', async t => {
     try { process.kill(pid, 0); await delay(50); } catch { return; }
   }
   assert.fail('Grok subprocess survived MCP close');
+});
+
+for (const unexpected of [false, true]) {
+  test(`Grok descendants are cleaned up after ${unexpected ? 'unexpected exit' : 'MCP close'}`, { skip: process.platform === 'win32' }, async t => {
+    const f = await fixture(t);
+    await f.chat({ prompt: unexpected ? 'descendant-exit' : 'descendant' });
+    const pid = f.events().find(e => e.event === 'descendant').pid;
+    t.after(() => { try { process.kill(pid, 'SIGKILL'); } catch {} });
+    if (!unexpected) await f.client.close();
+    for (let i = 0; i < 60; i++) {
+      try { process.kill(pid, 0); await delay(50); } catch { return; }
+    }
+    assert.fail('Grok descendant survived cleanup');
+  });
+}
+
+test('aborting a status wait returns promptly without cancelling the Grok turn', async () => {
+  const bridge = new Bridge();
+  const controller = new AbortController();
+  let finish;
+  const job = { status: 'running', done: new Promise(resolve => { finish = resolve; }) };
+  bridge.cancel = () => assert.fail('Status cancellation must not cancel the turn');
+  const pending = bridge.wait(job, 25, { signal: controller.signal });
+  controller.abort();
+  try {
+    const result = await Promise.race([pending, delay(500).then(() => 'still waiting')]);
+    assert.equal(result.status, 'running');
+    assert.equal(job.status, 'running');
+  } finally { finish(); await pending; }
 });

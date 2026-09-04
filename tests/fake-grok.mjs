@@ -2,6 +2,7 @@
 import readline from 'node:readline';
 import { appendFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
+import { spawn } from 'node:child_process';
 
 if (process.argv.includes('--version')) { console.log('grok 1.0.13 (test)'); process.exit(0); }
 const log = data => appendFileSync(process.env.GROK_TEST_LOG, JSON.stringify(data) + '\n');
@@ -31,12 +32,22 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
     const text = params.prompt[0].text;
     if (text === 'exit') return process.exit(7);
     if (text === 'error') return send({ id, error: { code: -32603, message: 'Bearer fake-secret xai-fake-secret' } });
-    // Fragmented Unicode and unrelated session notifications exercise the real SDK transport.
+    // Unicode and unrelated session notifications exercise the real SDK transport.
     chunk('unrelated-session', 'WRONG SESSION');
     chunk(params.sessionId, text === 'huge' ? 'x'.repeat(70000) : `回答:${text}`);
     send({ method: 'session/update', params: { sessionId: params.sessionId,
       update: { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'PRIVATE THOUGHT' } } } });
     if (text === 'slow') { active = { id }; return; }
+    if (text.startsWith('descendant')) {
+      const child = spawn(process.execPath, ['-e', "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000); process.send('ready');"],
+        { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
+      child.once('message', () => {
+        log({ event: 'descendant', pid: child.pid });
+        reply(id, { stopReason: 'end_turn' });
+        if (text === 'descendant-exit') setTimeout(() => process.exit(7), 20);
+      });
+      return;
+    }
     if (text === 'permission') send({ id: 'permission-1', method: 'session/request_permission', params: {
       sessionId: params.sessionId, toolCall: { toolCallId: 'write', title: 'Write' },
       options: [{ optionId: 'yes', name: 'Allow', kind: 'allow_once' }],

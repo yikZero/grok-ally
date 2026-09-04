@@ -114,7 +114,15 @@ export class Bridge {
 
   async wait(job, seconds = 25, extra, cancelOnAbort = false) {
     let timer;
-    const abort = () => { if (cancelOnAbort) this.cancel(job.requestId); };
+    let finishWait;
+    const deadline = new Promise(resolve => {
+      finishWait = resolve;
+      timer = setTimeout(resolve, seconds * 1000);
+    });
+    const abort = () => {
+      if (cancelOnAbort) this.cancel(job.requestId);
+      finishWait();
+    };
     extra?.signal?.addEventListener('abort', abort, { once: true });
     if (extra?.signal?.aborted) abort();
     let progress = 0;
@@ -126,7 +134,7 @@ export class Bridge {
       } }).catch(() => {});
     }, 1000);
     try {
-      await Promise.race([job.done, new Promise(resolve => { timer = setTimeout(resolve, seconds * 1000); })]);
+      await Promise.race([job.done, deadline]);
       return this.snapshot(job);
     } finally {
       clearTimeout(timer);

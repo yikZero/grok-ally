@@ -20,13 +20,13 @@ Research date: 2026-09-05. Grok Build public source: [`72a61251fcffb464bcc687aeb
 | --- | --- |
 | xAI HTTP model API | Useful for API-key applications, but does not preserve Grok Build's CLI login, agent runtime, or native local sessions. |
 | `grok -p` for every message | Smallest one-shot implementation. For an ongoing conversation it repeats process startup and session reload and has less direct lifecycle control. |
-| MCP → per-call Node companion → per-turn ACP | Existing local fork proves functionality, but adds a process hop, Codex task mapping, and a large unrelated job surface. Its chat cancellation did not reach ACP. |
+| MCP → per-call Node companion → per-turn ACP | Adds a process hop and repeats connection setup. A persistent child provides a direct cancellation path. |
 | **MCP → persistent ACP child** | Selected. One portable host-facing contract with native Grok session semantics. |
 | WebSocket daemon | Requires another server lifecycle, authentication, and reconnect policy. Defer until a real remote-client requirement exists. |
 
 ## Implementation choices
 
-The official [MCP TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk) and [ACP TypeScript SDK](https://github.com/agentclientprotocol/typescript-sdk) own protocol parsing, negotiation, request correlation, and framing. Both stdio transports use newline-delimited JSON. A second-opinion review incorrectly suggested Claude needed Content-Length framing; inspection of the MCP SDK and the official-client integration test refuted it. No custom dual-framing layer was added.
+The official [MCP TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk) and [ACP TypeScript SDK](https://github.com/agentclientprotocol/typescript-sdk) own protocol parsing, negotiation, request correlation, and framing. Both stdio transports use newline-delimited JSON.
 
 Explicit `sessionId` replaces host-thread environment variables. [ACP session setup](https://agentclientprotocol.com/protocol/v1/session-setup) defines loading and replay. Only fresh prompt updates enter a result. A failed load is visible to the caller.
 
@@ -34,4 +34,4 @@ Bounded request handles solve host tool deadlines without a daemon or a job data
 
 Codex and Claude package the same generated runtime with their own marketplace/manifest paths. [Codex packaging](https://developers.openai.com/plugins/build/plugins) uses a plugin-relative working directory; [Claude plugin configuration](https://code.claude.com/docs/en/plugins-reference) uses `${CLAUDE_PLUGIN_ROOT}`. Separate generated host packages avoid ambiguous default/custom MCP config merging. Installed plugins need no dependency installation.
 
-Version 0.1 focuses on text conversation. Planning, media, document generation, transcript import, workflow orchestration, and remote service hosting remain outside the bridge. The existing local plugin remains available for those workflows.
+Version 0.1 focuses on text conversation. Planning, media, document generation, transcript import, workflow orchestration, and remote service hosting remain outside the bridge.

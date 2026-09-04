@@ -18,4 +18,5 @@ jobs:
       - run: npm run build
       - run: git diff --exit-code -- plugins/ claude/
       - run: npm test
+      - run: npm run --silent release:notes > /dev/null
       - run: npm pack --dry-run --ignore-scripts

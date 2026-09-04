@@ -1,7 +1,7 @@
 {
   "name": "grok-bridge",
-  "version": "0.1.0",
-  "description": "Talk to Grok Build from Codex through a portable MCP to ACP bridge.",
+  "version": "0.1.1",
+  "description": "Talk to Grok Build through a portable MCP to ACP bridge.",
   "author": {
     "name": "yikZero",
     "url": "https://github.com/yikZero"

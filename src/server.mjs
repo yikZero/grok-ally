@@ -4,6 +4,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod/v4';
 import { Bridge } from './bridge.mjs';
 import { safeError, setup } from './grok.mjs';
+import pkg from '../package.json' with { type: 'json' };
 
 if (process.env.GROK_BRIDGE_ACTIVE === '1') {
   console.error('Recursive Grok Bridge launch blocked. Call the bridge from the host MCP client.');
@@ -11,7 +12,7 @@ if (process.env.GROK_BRIDGE_ACTIVE === '1') {
 }
 
 const bridge = new Bridge();
-const server = new McpServer({ name: 'grok-bridge', version: '0.1.0' });
+const server = new McpServer({ name: 'grok-bridge', version: pkg.version });
 const waitSeconds = z.number().int().min(0).max(25).default(25);
 const requestId = z.string().uuid();
 const result = data => ({ content: [{ type: 'text', text: JSON.stringify(data) }],
@@ -59,7 +60,7 @@ process.once('SIGTERM', () => { bridge.close(); void server.close(); });
 process.once('SIGINT', () => { bridge.close(); void server.close(); });
 process.stdin.once('end', () => { bridge.close(); void server.close(); });
 
-if (process.argv.includes('--version')) console.log('grok-bridge 0.1.0');
+if (process.argv.includes('--version')) console.log(`grok-bridge ${pkg.version}`);
 else if (process.argv.includes('--check')) {
   try { console.log(JSON.stringify(await setup(), null, 2)); }
   catch (error) { console.error(safeError(error)); process.exitCode = 1; }
