@@ -1,0 +1,3 @@
+**/dist/* linguist-generated=true
+# Bundled SDKs contain significant multiline template literals. Do not trim them.
+**/dist/server.mjs -whitespace

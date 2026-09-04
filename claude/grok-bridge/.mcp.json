@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "grok-bridge": {
+      "command": "node",
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/dist/server.mjs"
+      ]
+    }
+  }
+}

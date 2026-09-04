@@ -1,0 +1,11 @@
+Grok Bridge
+Copyright 2026 yikZero
+
+This independent project was informed by the Apache-2.0 grok-in-codex plugin
+by stdevMac (https://github.com/stdevMac/grok-in-codex) and its local
+compatibility fork. The portable runtime is a new implementation using
+the official MCP and ACP SDKs, rather than a copy of the companion runtime.
+
+Grok Build is developed by xAI. This project is not affiliated with or
+endorsed by xAI, OpenAI, or Anthropic. It does not redistribute Grok Build.
+Bundled dependency licenses are in plugins/grok-bridge/dist/THIRD_PARTY_LICENSES.txt.

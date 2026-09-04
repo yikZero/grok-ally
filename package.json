@@ -1,0 +1,23 @@
+{
+  "name": "@yikzero/grok-bridge",
+  "version": "0.1.0",
+  "description": "Talk to Grok Build from Codex, Claude Code, or any local MCP client.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "author": "yikZero",
+  "repository": { "type": "git", "url": "https://github.com/yikZero/grok-bridge.git" },
+  "engines": { "node": ">=22" },
+  "bin": { "grok-bridge": "plugins/grok-bridge/dist/server.mjs" },
+  "files": ["plugins/", "claude/", "README.md", "README.zh-CN.md", "LICENSE", "NOTICE", "docs/"],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "start": "node plugins/grok-bridge/dist/server.mjs",
+    "test": "node --test tests/*.test.mjs"
+  },
+  "devDependencies": {
+    "@agentclientprotocol/sdk": "1.4.0",
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "esbuild": "0.25.12",
+    "zod": "4.5.4"
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "mcpServers": {
+    "grok-bridge": { "command": "node", "args": ["./dist/server.mjs"], "cwd": "." }
+  }
+}

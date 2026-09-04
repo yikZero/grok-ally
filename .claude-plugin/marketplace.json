@@ -1,0 +1,7 @@
+{
+  "name": "grok-bridge",
+  "owner": { "name": "yikZero" },
+  "metadata": { "description": "Portable Grok Build conversations for Codex and Claude Code.", "version": "0.1.0" },
+  "plugins": [{ "name": "grok-bridge", "source": "./claude/grok-bridge",
+    "description": "Talk to Grok Build from Claude Code using your existing Grok login." }]
+}
