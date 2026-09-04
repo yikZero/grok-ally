@@ -24,8 +24,8 @@ export class Bridge {
     }
     if (session) {
       if (session.busy) throw new Error('This session already has an active turn. Wait or cancel it first.');
-      if (session.options.cwd !== options.cwd || session.options.write !== options.write || session.options.maxTurns !== options.maxTurns) {
-        throw new Error('A live session must keep the same cwd, write and maxTurns settings.');
+      if (session.options.cwd !== options.cwd || session.options.write !== options.write) {
+        throw new Error('A live session must keep the same cwd and write settings.');
       }
       clearTimeout(session.idleTimer);
     } else {
@@ -89,13 +89,18 @@ export class Bridge {
   update(session, update) {
     const job = session.busy;
     if (!job) return;
-    if (update.sessionUpdate === 'agent_message_chunk' && update.content?.type === 'text') {
-      const text = job.text + update.content.text;
+    if (update.sessionUpdate === 'agent_message_chunk' && update.content?.type === 'text' && update.content.text) {
+      const separator = job.separateText && job.text && !job.text.endsWith('\n\n') ? '\n\n' : '';
+      const text = job.text + separator + update.content.text;
+      job.separateText = false;
       job.text = text.slice(0, MAX_TEXT);
       job.truncated ||= text.length > MAX_TEXT;
-    } else if (update.sessionUpdate === 'tool_call' && job.tools.length < 100) {
-      job.tools.push({ id: update.toolCallId, title: String(update.title || 'tool').slice(0, 200),
-        kind: update.kind, status: update.status });
+    } else if (update.sessionUpdate === 'tool_call') {
+      job.separateText = true;
+      if (job.tools.length < 100) {
+        job.tools.push({ id: update.toolCallId, title: String(update.title || 'tool').slice(0, 200),
+          kind: update.kind, status: update.status });
+      }
     } else if (update.sessionUpdate === 'tool_call_update') {
       const tool = job.tools.find(t => t.id === update.toolCallId);
       if (tool && update.status) tool.status = update.status;

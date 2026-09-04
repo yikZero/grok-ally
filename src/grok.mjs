@@ -47,13 +47,14 @@ export class GrokSession {
     this.options = options;
     this.sessionId = options.sessionId;
     const args = ['--sandbox', options.write ? 'workspace' : 'read-only',
-      '--no-subagents', '--max-turns', String(options.maxTurns), 'agent', '--no-leader', '--always-approve'];
+      'agent', '--no-leader', '--always-approve'];
     if (options.model) args.push('--model', options.model);
     if (options.effort) args.push('--reasoning-effort', options.effort);
     args.push('stdio');
     this.child = spawn(binary(), args, {
       cwd: options.cwd,
-      env: { ...process.env, GROK_DISABLE_AUTOUPDATER: '1', GROK_ALLY_ACTIVE: '1', NO_COLOR: '1', RUST_LOG: 'off' },
+      env: { ...process.env, GROK_DISABLE_AUTOUPDATER: '1', GROK_SUBAGENTS: '0',
+        GROK_ALLY_ACTIVE: '1', NO_COLOR: '1', RUST_LOG: 'off' },
       detached: process.platform !== 'win32',
       stdio: ['pipe', 'pipe', 'pipe'],
     });
@@ -89,6 +90,17 @@ export class GrokSession {
       } else {
         const session = await this.connection.agent.request('session/new', params);
         if (!session.sessionId) throw new Error('Grok returned no sessionId.');
+        // Native CLI overrides can silently fall back. Check before sending user content.
+        const model = session.configOptions?.find(option => option.id === 'model')?.currentValue
+          ?? session.models?.currentModelId;
+        const effort = session.configOptions?.find(option => option.id === 'reasoning_effort')?.currentValue
+          ?? session.models?.availableModels?.find(entry => entry.modelId === model)?._meta?.reasoningEffort;
+        for (const [name, actual] of [['model', model], ['effort', effort]]) {
+          const requested = this.options[name];
+          if (requested && actual !== requested) {
+            throw new Error(`Requested ${name} "${requested}" was not selected: Grok reported "${actual ?? 'unknown'}". Use an available value or omit ${name} for Grok's default.`);
+          }
+        }
         this.sessionId = session.sessionId;
       }
       return this.sessionId;

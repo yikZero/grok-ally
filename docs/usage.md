@@ -78,12 +78,15 @@ For a follow-up, add the returned `sessionId`. Omitting it starts an independent
 | `cwd` | Required | Absolute project directory |
 | `sessionId` | New conversation | Native Grok ID returned by a previous call |
 | `write` | `false` | `true` authorizes workspace edits |
-| `maxTurns` | `20` | Grok agent turn limit, from 1 to 100 |
 | `model` | Grok default | New sessions only |
 | `effort` | Grok default | New sessions only: `minimal`, `low`, `medium`, `high`, `xhigh` |
 | `waitSeconds` | `25` | Return after 0–25 seconds; the turn can keep running |
 
-A live session keeps the same `cwd`, `write`, and `maxTurns`. Omit `model` and `effort` when continuing. Start a separate conversation to change settings immediately.
+A live session keeps the same `cwd` and `write`. Omit `model` and `effort` when continuing. Start a separate conversation to change settings immediately.
+
+Version 0.4.0 removes `maxTurns`: Grok's ACP mode did not enforce the CLI flag used by earlier versions. Remove this argument from manual calls. Use `grok_cancel` to stop a turn; the bridge's one-hour timeout still applies. Neither control is a token or spending budget.
+
+Use an exact model ID from `grok models`. Available reasoning levels depend on that model and your Grok installation. Before sending a new session's prompt, the bridge checks that Grok selected the requested model and effort. If either value was ignored, changed, or cannot be confirmed, the call fails with the reported value instead of silently using a fallback. Omit the overrides to use native defaults.
 
 ## Results and cancellation
 
@@ -114,6 +117,8 @@ Grok saves conversations. After a client restart or idle cleanup, continue with 
 The bridge uses Grok's sandbox: `read-only` by default, or `workspace` for `write: true`. Read-only restricts workspace writes; Grok can still read other files and write its own state and temporary files. Native tools, hooks, configured MCP servers, network rules, and privacy settings remain controlled by Grok.
 
 Both modes use `--always-approve` inside the selected OS sandbox. The bridge rejects unexpected ACP client permission requests and advertises no client filesystem or terminal capabilities. Sandbox startup failures are returned as errors. This is not an additional security sandbox.
+
+Grok subagents are disabled in the bridge's child process with `GROK_SUBAGENTS=0`, the setting supported by ACP mode. This does not change your saved Grok configuration.
 
 The bridge reuses Grok Build authentication and account limits, without reading credential files or requiring a separate API key. `GROK_BINARY` overrides the executable; otherwise discovery checks PATH and `$GROK_HOME/bin/grok` (default `~/.grok/bin/grok`). `grok_setup` checks the binary and version; a successful chat verifies account access.
 

@@ -20,7 +20,7 @@ async function fixture(t, previous) {
   const log = path.join(cwd, 'events.jsonl');
   const transport = new StdioClientTransport({ command: process.execPath,
     args: [path.join(root, 'plugins/grok-ally/dist/server.mjs')],
-    env: { ...process.env, GROK_BINARY: fake, GROK_TEST_LOG: log }, stderr: 'pipe', cwd });
+    env: { ...process.env, GROK_BINARY: fake, GROK_TEST_LOG: log, GROK_SUBAGENTS: '1' }, stderr: 'pipe', cwd });
   let stderr = '';
   transport.stderr?.on('data', data => { stderr += data; });
   const client = new Client({ name: 'bridge-test', version: '1' });
@@ -42,6 +42,7 @@ test('official MCP client: schemas, same-process conversation, defaults and isol
   assert.equal((await f.call('grok_chat', { prompt: 'missing cwd' })).isError, true);
   assert.equal((await f.call('grok_chat', { cwd: f.cwd, prompt: 'x', write: 'false' })).isError, true);
   assert.equal((await f.call('grok_chat', { cwd: '.', prompt: 'x' })).isError, true);
+  assert.equal((await f.call('grok_chat', { cwd: f.cwd, prompt: 'x', maxTurns: 1 })).isError, true);
   const first = await f.chat({ prompt: '你好' });
   assert.equal(first.status, 'completed');
   assert.equal(first.text, '回答:你好');
@@ -56,6 +57,8 @@ test('official MCP client: schemas, same-process conversation, defaults and isol
   assert.equal(spawn.cwd, realpathSync(f.cwd));
   assert.deepEqual(spawn.args.slice(0, 2), ['--sandbox', 'read-only']);
   assert.ok(spawn.args.includes('--no-leader'));
+  assert.equal(spawn.args.includes('--max-turns'), false);
+  assert.equal(spawn.subagents, '0');
   assert.equal((await f.call('grok_chat', { cwd: f.cwd, prompt: 'change mode', sessionId: first.sessionId, write: true })).isError, true);
   const unrelated = await f.chat({ prompt: 'separate' });
   assert.notEqual(unrelated.sessionId, first.sessionId);
@@ -81,6 +84,29 @@ test('resume after MCP restart ignores replay; load failure never starts a new s
   const reconnected = await two.chat({ prompt: 'reconnect', sessionId: idleExit.sessionId });
   assert.equal(reconnected.status, 'completed');
   assert.equal(reconnected.sessionId, idleExit.sessionId);
+});
+
+test('explicit model and effort mismatches fail before sending the prompt', async t => {
+  const f = await fixture(t);
+  const valid = await f.chat({ prompt: 'selected', model: 'grok-4.5', effort: 'xhigh' });
+  assert.equal(valid.status, 'completed');
+  assert.equal((await f.chat({ prompt: 'configured', model: 'config-model', effort: 'low' })).status, 'completed');
+  const before = f.events().filter(e => e.method === 'session/prompt').length;
+  const missing = await f.chat({ prompt: 'must not send', model: 'missing-model' });
+  assert.equal(missing.status, 'failed');
+  assert.match(missing.error, /model.*missing-model.*grok-4\.6/i);
+  const ignored = await f.chat({ prompt: 'must not send', model: 'grok-4.6', effort: 'minimal' });
+  assert.equal(ignored.status, 'failed');
+  assert.match(ignored.error, /effort.*minimal.*high/i);
+  assert.equal(f.events().filter(e => e.method === 'session/prompt').length, before);
+});
+
+test('text around tool calls stays separated while streamed chunks stay joined', async t => {
+  const f = await fixture(t);
+  const result = await f.chat({ prompt: 'text-around-tools' });
+  assert.equal(result.status, 'completed');
+  assert.equal(result.text, 'Before tools.\n\nAfter tools.');
+  assert.deepEqual(result.tools.map(tool => tool.status), ['completed']);
 });
 
 test('slow turns return handles, reject overlapping prompts and cancel via ACP', async t => {

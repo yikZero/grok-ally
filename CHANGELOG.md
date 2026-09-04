@@ -2,6 +2,20 @@
 
 Notable changes for users. Each release uses the notes below.
 
+## [0.4.0] - 2026-09-05
+
+Fix model settings and execution controls in ACP mode.
+
+### Changed
+
+- **Breaking:** Remove `maxTurns` from manual `grok_chat` calls. Grok's ACP mode did not enforce this CLI flag. Cancellation and the one-hour timeout remain available.
+
+### Fixed
+
+- Reject model or reasoning-effort overrides that Grok did not apply, before sending the prompt.
+- Disable Grok subagents through the setting supported by ACP mode.
+- Separate messages around tool calls so progress text and final answers do not run together.
+
 ## [0.3.0] - 2026-09-05
 
 Grok Bridge is now Grok Ally.

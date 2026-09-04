@@ -13,6 +13,6 @@ Use this plugin's `grok_chat` tool. Always pass the user's absolute project dire
 - `incomplete` (including turn limits), `failed`, and `cancelled` are not successful completion. Preserve partial output and the session ID, and report the actual status.
 - Attribute Grok's answer to Grok. Preserve its evidence, uncertainty, file locations, and proposed next steps; distinguish any host verification or conclusions from Grok's report. Do not substitute a host-generated answer for a failed Grok call.
 - To stop, call `grok_cancel`, then confirm with `grok_status`. Cancellation does not undo edits.
-- Omit `model` and `effort` to use Grok's native settings. They are creation-only options. Keep `cwd`, `write`, and `maxTurns` consistent for a live session.
+- Omit `model` and `effort` to use Grok's native settings. They are creation-only options. Keep `cwd` and `write` consistent for a live session. Do not pass `maxTurns`; Grok's ACP mode does not enforce that CLI option.
 - When sharing an ID with another local MCP client, finish the active turn first. Do not prompt the same Grok session from two host processes concurrently.
 - `grok_setup` checks installation, not login. If chat reports an authentication error, tell the user to run `grok login` in their terminal.
