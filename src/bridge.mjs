@@ -1,8 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { GrokSession, safeError, workspace } from './grok.mjs';
+import { Output } from './output.mjs';
 
 const RUNNING = new Set(['starting', 'running', 'cancelling']);
-const MAX_TEXT = 64000;
+const ACTIVE_TOOL = new Set(['pending', 'in_progress']);
+const MAX_RECENT_TOOLS = 100;
+const now = () => new Date().toISOString();
+const title = value => safeError(String(value || 'tool')).replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 200);
 
 export class Bridge {
   constructor({ Session = GrokSession, idleMs = 300000, turnMs = 3600000, cancelMs = 5000 } = {}) {
@@ -39,11 +43,12 @@ export class Bridge {
     }
     for (const [id, job] of this.jobs) {
       if (this.jobs.size < 100) break;
-      if (!RUNNING.has(job.status)) this.jobs.delete(id);
+      if (!RUNNING.has(job.status)) { job.output.close(); this.jobs.delete(id); }
     }
     const job = { requestId: randomUUID(), sessionId: session.sessionId || null, status: 'starting',
-      text: '', truncated: false, tools: [], session, cwd: options.cwd, write: options.write,
-      createdAt: new Date().toISOString() };
+      output: new Output(), tools: [], toolTotals: { total: 0, failed: 0, unconfirmed: 0 },
+      revision: 1, textRevision: 0, waiters: new Set(), session, cwd: options.cwd, write: options.write,
+      createdAt: now(), finishedAt: null, lastProgressAt: now() };
     session.busy = job;
     this.jobs.set(job.requestId, job);
     job.done = this.run(job, options.prompt);
@@ -63,6 +68,7 @@ export class Bridge {
       }
       if (job.status === 'cancelling') { job.status = 'cancelled'; return; }
       job.status = 'running';
+      this.touch(job);
       const result = await session.prompt(prompt);
       job.stopReason = result.stopReason;
       job.status = job.error ? 'failed' : job.status === 'cancelling' || result.stopReason === 'cancelled'
@@ -75,6 +81,17 @@ export class Bridge {
     } finally {
       clearTimeout(timeout);
       clearTimeout(job.cancelTimer);
+      job.finishedAt = now();
+      // A terminal prompt does not prove that a missing tool completion succeeded.
+      for (const tool of job.tools) {
+        if (!ACTIVE_TOOL.has(tool.status)) continue;
+        tool.reportedStatus = tool.status;
+        tool.status = 'unconfirmed';
+        tool.revision = job.revision + 1;
+        job.toolTotals.unconfirmed++;
+      }
+      this.pruneTools(job);
+      this.touch(job, false);
       // Order finished requests by completion, including long turns that started earlier.
       this.jobs.delete(job.requestId);
       this.jobs.set(job.requestId, job);
@@ -88,24 +105,55 @@ export class Bridge {
 
   update(session, update) {
     const job = session.busy;
-    if (!job) return;
+    if (!job || !RUNNING.has(job.status) || job.outputError) return;
     if (update.sessionUpdate === 'agent_message_chunk' && update.content?.type === 'text' && update.content.text) {
-      const separator = job.separateText && job.text && !job.text.endsWith('\n\n') ? '\n\n' : '';
-      const text = job.text + separator + update.content.text;
-      job.separateText = false;
-      job.text = text.slice(0, MAX_TEXT);
-      job.truncated ||= text.length > MAX_TEXT;
-    } else if (update.sessionUpdate === 'tool_call') {
-      job.separateText = true;
-      if (job.tools.length < 100) {
-        job.tools.push({ id: update.toolCallId, title: String(update.title || 'tool').slice(0, 200),
-          kind: update.kind, status: update.status });
+      const separator = job.separateText && job.output.totalBytes && job.output.ending !== '\n\n' ? '\n\n' : '';
+      try { job.output.append(separator + update.content.text); }
+      catch (error) {
+        job.outputError = true;
+        job.error = `Could not retain complete output: ${safeError(error)}`;
+        this.cancel(job.requestId);
+        return;
       }
-    } else if (update.sessionUpdate === 'tool_call_update') {
-      const tool = job.tools.find(t => t.id === update.toolCallId);
-      if (tool && update.status) tool.status = update.status;
-    }
+      job.separateText = false;
+      job.textRevision = job.revision + 1;
+    } else if (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') {
+      let tool = job.tools.find(t => t.id === update.toolCallId);
+      if (!tool) {
+        if (update.sessionUpdate !== 'tool_call') return;
+        tool = { id: update.toolCallId, title: 'tool', status: 'pending', startedAt: now(), finishedAt: null };
+        job.tools.push(tool);
+        job.toolTotals.total++;
+      }
+      job.separateText = true;
+      if (tool.status === 'failed') job.toolTotals.failed--;
+      if (update.title != null) tool.title = title(update.title);
+      if (update.kind != null) tool.kind = update.kind;
+      if (update.locations != null) tool.locations = update.locations.slice(0, 10).map(({ path, line }) =>
+        ({ path: title(path), ...(line != null ? { line } : {}) }));
+      if (update.status != null) tool.status = update.status;
+      if (tool.status === 'failed') job.toolTotals.failed++;
+      tool.finishedAt = ACTIVE_TOOL.has(tool.status) ? null : tool.finishedAt || now();
+      tool.revision = job.revision + 1;
+      // Keep the most recently updated completed calls, plus every active call.
+      job.tools.splice(job.tools.indexOf(tool), 1);
+      job.tools.push(tool);
+      this.pruneTools(job);
+    } else return;
+    this.touch(job);
     // Thought streams and raw tool inputs/outputs are not part of the chat result.
+  }
+
+  pruneTools(job) {
+    const finished = tool => tool.status === 'completed' || tool.status === 'failed';
+    let excess = job.tools.filter(finished).length - MAX_RECENT_TOOLS;
+    job.tools = job.tools.filter(t => !finished(t) || excess-- <= 0);
+  }
+
+  touch(job, progress = true) {
+    job.revision++;
+    if (progress) job.lastProgressAt = now();
+    for (const wake of job.waiters) wake();
   }
 
   get(id) {
@@ -117,20 +165,41 @@ export class Bridge {
   list(cwd) {
     cwd = workspace(cwd);
     const jobs = [...this.jobs.values()].reverse().filter(job => job.cwd === cwd)
-      .map(({ requestId, sessionId, status, write, createdAt }) => ({ requestId, sessionId, status, write, createdAt }));
+      .map(({ requestId, sessionId, status, write, createdAt, finishedAt, lastProgressAt, revision }) =>
+        ({ requestId, sessionId, status, write, createdAt, finishedAt, lastProgressAt, revision }));
     return { cwd, active: jobs.filter(job => RUNNING.has(job.status)),
       recent: jobs.filter(job => !RUNNING.has(job.status)).slice(0, 10) };
   }
 
-  snapshot(job) {
-    return { requestId: job.requestId, sessionId: job.sessionId, status: job.status,
-      cwd: job.cwd, write: job.write, createdAt: job.createdAt, text: job.text, truncated: job.truncated,
-      tools: job.tools, ...(job.stopReason ? { stopReason: job.stopReason } : {}),
+  snapshot(job, { afterRevision, outputOffset, outputLimit } = {}) {
+    const active = job.tools.filter(t => ACTIVE_TOOL.has(t.status));
+    const changed = afterRevision === undefined || job.revision > afterRevision;
+    const data = { requestId: job.requestId, sessionId: job.sessionId, status: job.status,
+      cwd: job.cwd, write: job.write, createdAt: job.createdAt, finishedAt: job.finishedAt,
+      lastProgressAt: job.lastProgressAt, revision: job.revision, changed,
+      toolSummary: { ...job.toolTotals, active: active.length,
+        unfinished: active.length + job.toolTotals.unconfirmed, dropped: job.toolTotals.total - job.tools.length },
+      ...(job.stopReason ? { stopReason: job.stopReason } : {}),
       ...(job.error ? { error: job.error } : {}) };
+    if (changed) data.tools = job.tools.filter(tool => afterRevision === undefined || tool.revision > afterRevision)
+      .map(({ revision, ...tool }) => ({ ...tool,
+        durationMs: Math.max(0, Date.parse(tool.finishedAt || job.finishedAt || now()) - Date.parse(tool.startedAt)) }));
+    if (outputOffset !== undefined || afterRevision === undefined || job.textRevision > afterRevision) {
+      Object.assign(data, job.output.page(outputOffset, outputLimit));
+    } else data.output = { totalBytes: job.output.totalBytes };
+    return data;
   }
 
-  async wait(job, seconds = 25, extra, cancelOnAbort = false) {
+  async wait(job, seconds = 25, extra, cancelOnAbort = false, query = {}) {
+    if (query.afterRevision > job.revision) throw new Error('afterRevision is newer than this request. Use its last returned revision.');
+    if (query.outputOffset > job.output.totalBytes) throw new Error('outputOffset must be between 0 and output.totalBytes.');
+    if (!RUNNING.has(job.status)
+      || (query.outputOffset !== undefined && (query.afterRevision === undefined
+        || (query.afterRevision === job.revision && query.outputOffset < job.output.totalBytes)))) {
+      return this.snapshot(job, query);
+    }
     let timer;
+    let changeTimer;
     let finishWait;
     const deadline = new Promise(resolve => {
       finishWait = resolve;
@@ -140,22 +209,35 @@ export class Bridge {
       if (cancelOnAbort) this.cancel(job.requestId);
       finishWait();
     };
+    // Grok can stream a few bytes per event. Batch short bursts instead of one MCP reply per token.
+    const onChange = () => {
+      if (!RUNNING.has(job.status) || job.status === 'cancelling') finishWait();
+      else changeTimer ??= setTimeout(finishWait, 200);
+    };
+    if (query.afterRevision !== undefined) {
+      job.waiters.add(onChange);
+      if (job.revision > query.afterRevision) onChange();
+    }
     extra?.signal?.addEventListener('abort', abort, { once: true });
     if (extra?.signal?.aborted) abort();
     let progress = 0;
     const token = extra?._meta?.progressToken;
     const progressTimer = token === undefined ? null : setInterval(() => {
+      const current = job.tools.find(t => ACTIVE_TOOL.has(t.status));
       void extra.sendNotification({ method: 'notifications/progress', params: {
         progressToken: token, progress: ++progress,
-        message: `Grok ${job.status}${job.sessionId ? ` · ${job.sessionId}` : ''} · ${job.text.length} characters`,
+        message: `Grok ${job.status} · ${job.toolTotals.total} tools · ${job.output.totalBytes} bytes`
+          + (current ? ` · ${current.title} (${Math.max(0, Math.floor((Date.now() - Date.parse(current.startedAt)) / 1000))}s)` : ''),
       } }).catch(() => {});
     }, 1000);
     try {
       await Promise.race([job.done, deadline]);
-      return this.snapshot(job);
+      return this.snapshot(job, query);
     } finally {
       clearTimeout(timer);
+      clearTimeout(changeTimer);
       clearInterval(progressTimer);
+      job.waiters.delete(onChange);
       extra?.signal?.removeEventListener('abort', abort);
     }
   }
@@ -164,6 +246,7 @@ export class Bridge {
     const job = this.get(id);
     if (RUNNING.has(job.status) && job.status !== 'cancelling') {
       job.status = 'cancelling';
+      this.touch(job, false);
       if (job.session.sessionId) void job.session.cancel().catch(() => this.drop(job.session));
       else this.drop(job.session);
       job.cancelTimer = setTimeout(() => this.drop(job.session), this.cancelMs);
@@ -177,5 +260,8 @@ export class Bridge {
     this.sessions.delete(session);
   }
 
-  close() { for (const session of this.sessions) this.drop(session); }
+  close() {
+    for (const session of this.sessions) this.drop(session);
+    for (const job of this.jobs.values()) job.output.close();
+  }
 }

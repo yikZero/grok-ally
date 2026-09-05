@@ -1,6 +1,6 @@
 {
   "name": "grok-ally",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Talk to Grok Build from Codex, Claude Code, or any local MCP client.",
   "type": "module",
   "license": "Apache-2.0",

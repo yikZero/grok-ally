@@ -8,6 +8,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { Bridge } from '../src/bridge.mjs';
+import { Output } from '../src/output.mjs';
 import pkg from '../package.json' with { type: 'json' };
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -145,7 +146,7 @@ test('workspace status recovers handles, isolates projects and bounds finished r
   assert.equal(listing.recent[0].requestId, finished.requestId);
   assert.ok(listing.recent.every(job => job.sessionId === finished.sessionId));
   for (const job of [...listing.active, ...listing.recent]) {
-    assert.deepEqual(Object.keys(job).sort(), ['createdAt', 'requestId', 'sessionId', 'status', 'write']);
+    assert.deepEqual(Object.keys(job).sort(), ['createdAt', 'finishedAt', 'lastProgressAt', 'requestId', 'revision', 'sessionId', 'status', 'write']);
     assert.ok(Number.isFinite(Date.parse(job.createdAt)));
   }
   assert.equal((await f.call('grok_status', { cwd: f.cwd, requestId: active.requestId })).isError, true);
@@ -177,8 +178,9 @@ test('turn limits, child errors, permission requests and output bounds fail hone
   assert.doesNotMatch(failed.error, /fake-secret/);
   assert.equal((await f.chat({ prompt: 'exit' })).status, 'failed');
   const huge = await f.chat({ prompt: 'huge' });
-  assert.equal(huge.text.length, 64000);
+  assert.equal(huge.text.length, 16000);
   assert.equal(huge.truncated, true);
+  assert.ok(huge.text.endsWith('FINAL_CONCLUSION'));
   const permission = await f.chat({ prompt: 'permission' });
   assert.equal(permission.status, 'completed');
   await delay(50);
@@ -214,7 +216,8 @@ test('aborting a status wait returns promptly without cancelling the Grok turn',
   const bridge = new Bridge();
   const controller = new AbortController();
   let finish;
-  const job = { status: 'running', done: new Promise(resolve => { finish = resolve; }) };
+  const job = { status: 'running', tools: [], toolTotals: { total: 0, failed: 0, unconfirmed: 0 },
+    waiters: new Set(), output: new Output(), done: new Promise(resolve => { finish = resolve; }) };
   bridge.cancel = () => assert.fail('Status cancellation must not cancel the turn');
   const pending = bridge.wait(job, 25, { signal: controller.signal });
   controller.abort();
@@ -223,4 +226,56 @@ test('aborting a status wait returns promptly without cancelling the Grok turn',
     assert.equal(result.status, 'running');
     assert.equal(job.status, 'running');
   } finally { finish(); await pending; }
+});
+
+test('long tool histories retain recent actions and disclose unconfirmed completion', async t => {
+  const f = await fixture(t);
+  const result = await f.chat({ prompt: 'many-tools' });
+  assert.equal(result.status, 'completed');
+  assert.deepEqual(result.toolSummary, { total: 132, failed: 13, unconfirmed: 1, active: 0, unfinished: 1, dropped: 31 });
+  assert.equal(result.tools.length, 101);
+  assert.ok(result.tools.some(t => t.id === 'tool-129'));
+  assert.equal(result.tools.find(t => t.id === 'held').status, 'completed');
+  const unclosed = result.tools.find(t => t.id === 'unclosed');
+  assert.equal(unclosed.status, 'unconfirmed');
+  assert.equal(unclosed.reportedStatus, 'in_progress');
+  assert.equal(unclosed.finishedAt, null);
+  assert.deepEqual(unclosed.locations, [{ path: '/project/实现.mjs', line: 7 }]);
+  assert.doesNotMatch(JSON.stringify(result), /fake-secret|SECRET_INPUT/);
+  assert.ok(Date.parse(result.finishedAt) >= Date.parse(result.lastProgressAt));
+  await delay(30);
+  const later = (await f.call('grok_status', { requestId: result.requestId, waitSeconds: 0 })).structuredContent;
+  assert.deepEqual(later.tools, result.tools);
+});
+
+test('full Unicode output pages reconstruct every chunk and final answer over MCP', async t => {
+  const f = await fixture(t);
+  const result = await f.chat({ prompt: 'unicode-output' });
+  assert.equal(result.status, 'completed');
+  assert.ok(result.text.endsWith('\n最终结论：全部通过。'));
+  assert.equal(result.truncated, true);
+  const expected = Array.from({ length: 40 }, (_, i) => `第${i}段🙂` + '正文'.repeat(1000)).join('') + '\n最终结论：全部通过。';
+  const read = args => f.call('grok_status', { requestId: result.requestId, ...args });
+  let offset = 0, actual = '';
+  do {
+    const page = (await read({ outputOffset: offset, outputLimit: 7001 })).structuredContent;
+    assert.equal(page.output.offset, offset);
+    assert.ok(page.output.nextOffset > offset);
+    assert.ok(Buffer.byteLength(page.text) <= 7001);
+    assert.equal(page.output.totalBytes, Buffer.byteLength(expected));
+    actual += page.text;
+    offset = page.output.nextOffset;
+    assert.equal(page.output.hasMore, offset < Buffer.byteLength(expected));
+  } while (offset < Buffer.byteLength(expected));
+  assert.equal(actual, expected);
+  assert.equal((await read({ outputOffset: offset })).structuredContent.text, '');
+  assert.equal((await read({ outputOffset: 1 })).isError, true);
+  assert.equal((await read({ outputOffset: offset + 1 })).isError, true);
+  assert.equal((await read({ outputLimit: 50 })).isError, true);
+  assert.equal((await f.call('grok_status', { cwd: f.cwd, afterRevision: 0 })).isError, true);
+  const unchanged = (await read({ afterRevision: result.revision, waitSeconds: 60 })).structuredContent;
+  assert.equal(unchanged.changed, false);
+  assert.equal(unchanged.text, undefined);
+  assert.equal(unchanged.tools, undefined);
+  assert.equal((await read({ afterRevision: result.revision + 1 })).isError, true);
 });

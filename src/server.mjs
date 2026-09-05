@@ -13,7 +13,7 @@ if (process.env.GROK_ALLY_ACTIVE === '1') {
 
 const bridge = new Bridge();
 const server = new McpServer({ name: 'grok-ally', version: pkg.version });
-const waitSeconds = z.number().int().min(0).max(25).default(25);
+const waitSeconds = z.number().int().min(0).max(60).default(25);
 const requestId = z.string().uuid();
 const result = data => ({ content: [{ type: 'text', text: JSON.stringify(data) }],
   structuredContent: data, isError: data.status === 'failed' || data.status === 'incomplete' });
@@ -37,14 +37,22 @@ server.registerTool('grok_chat', {
 }, handle((input, extra) => bridge.wait(bridge.start(input), input.waitSeconds, extra, true)));
 
 server.registerTool('grok_status', {
-  description: 'Pass requestId to read a turn or wait up to 25 seconds; repeat while starting/running/cancelling. Pass cwd instead to immediately list all active and the 10 most recent finished requests for that exact workspace. Listings contain IDs and status, not message text. Results exist only in this MCP process; keep sessionId for follow-ups.',
+  description: 'Read a turn by requestId. Pass its last revision as afterRevision to wait for changes; unchanged replies omit text/tools. Default 25 seconds, at most 60 if the host timeout allows. Text is a recent preview; use outputOffset=0, then output.nextOffset to page the full answer. Pass cwd instead to list active and 10 recent requests. Results last only in this MCP process; keep sessionId for follow-ups.',
   inputSchema: z.object({ requestId: requestId.optional(),
     cwd: z.string().min(1).optional().describe('Absolute workspace path. Use instead of requestId to find requests.'),
-    waitSeconds }).strict(),
+    waitSeconds,
+    afterRevision: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional().describe('Last revision from this request; wakes on progress or completion.'),
+    outputOffset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional().describe('UTF-8 byte offset. Start at 0; continue with output.nextOffset. Pages return immediately unless afterRevision is also supplied.'),
+    outputLimit: z.number().int().min(4).max(64000).optional().describe('Page size in UTF-8 bytes; default 16000. Use with outputOffset.'),
+  }).strict(),
   annotations: { readOnlyHint: true, openWorldHint: false },
 }, handle((input, extra) => {
   if (Boolean(input.requestId) === Boolean(input.cwd)) throw new Error('Pass either requestId or cwd, not both.');
-  return input.requestId ? bridge.wait(bridge.get(input.requestId), input.waitSeconds, extra) : bridge.list(input.cwd);
+  if (input.cwd && (input.afterRevision !== undefined || input.outputOffset !== undefined || input.outputLimit !== undefined)) {
+    throw new Error('afterRevision and output paging require requestId.');
+  }
+  if (input.outputLimit !== undefined && input.outputOffset === undefined) throw new Error('outputLimit requires outputOffset.');
+  return input.requestId ? bridge.wait(bridge.get(input.requestId), input.waitSeconds, extra, false, input) : bridge.list(input.cwd);
 }));
 
 server.registerTool('grok_cancel', {

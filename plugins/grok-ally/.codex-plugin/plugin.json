@@ -1,6 +1,6 @@
 {
   "name": "grok-ally",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Talk to Grok Build through a portable MCP to ACP bridge.",
   "author": {
     "name": "yikZero",

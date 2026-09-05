@@ -2,6 +2,25 @@
 
 Notable changes for users. Each release uses the notes below.
 
+## [0.5.0] - 2026-09-05
+
+Follow long tasks and retrieve their complete answers.
+
+### Added
+
+- Incremental status queries with `afterRevision`, progress-triggered returns, and optional waits up to 60 seconds. The default remains 25 seconds.
+- Full answer pagination through `grok_status`, plus finish times, recent activity, and tool durations.
+
+### Fixed
+
+- Keep active tools and the latest 100 completed calls, with total, failed, and dropped counts. Long tasks no longer stop showing new tools.
+- Preserve long answers in private temporary storage, including the final conclusion. If storage fails, report a failed turn.
+- Mark missing tool completion events as `unconfirmed` when a turn ends.
+
+### Changed
+
+- `text` is now a recent preview of up to 16,000 UTF-8 bytes. When `truncated` is true, use `outputOffset: 0` and subsequent `output.nextOffset` values to read the full answer.
+
 ## [0.4.0] - 2026-09-05
 
 Fix model settings and execution controls in ACP mode.

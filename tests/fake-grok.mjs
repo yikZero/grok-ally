@@ -43,6 +43,24 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
   }
   if (method === 'session/prompt') {
     const text = params.prompt[0].text;
+    if (text === 'many-tools') {
+      const tool = update => send({ method: 'session/update', params: { sessionId: params.sessionId, update } });
+      tool({ sessionUpdate: 'tool_call', toolCallId: 'held', title: 'Long build', status: 'in_progress' });
+      for (let i = 0; i < 130; i++) {
+        tool({ sessionUpdate: 'tool_call', toolCallId: `tool-${i}`, title: `Read ${i}`, status: 'in_progress' });
+        tool({ sessionUpdate: 'tool_call_update', toolCallId: `tool-${i}`, status: i % 10 === 0 ? 'failed' : 'completed' });
+      }
+      tool({ sessionUpdate: 'tool_call_update', toolCallId: 'held', status: 'completed' });
+      tool({ sessionUpdate: 'tool_call', toolCallId: 'unclosed', title: 'Read Bearer fake-secret', status: 'in_progress',
+        locations: [{ path: '/project/实现.mjs', line: 7 }], rawInput: { secret: 'SECRET_INPUT' } });
+      chunk(params.sessionId, 'All done.');
+      return reply(id, { stopReason: 'end_turn' });
+    }
+    if (text === 'unicode-output') {
+      for (let i = 0; i < 40; i++) chunk(params.sessionId, `第${i}段🙂` + '正文'.repeat(1000));
+      chunk(params.sessionId, '\n最终结论：全部通过。');
+      return reply(id, { stopReason: 'end_turn' });
+    }
     if (text === 'text-around-tools') {
       chunk(params.sessionId, 'Before ');
       chunk(params.sessionId, 'tools.');
@@ -59,7 +77,7 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
     if (text === 'error') return send({ id, error: { code: -32603, message: 'Bearer fake-secret xai-fake-secret' } });
     // Unicode and unrelated session notifications exercise the real SDK transport.
     chunk('unrelated-session', 'WRONG SESSION');
-    chunk(params.sessionId, text === 'huge' ? 'x'.repeat(70000) : `回答:${text}`);
+    chunk(params.sessionId, text === 'huge' ? 'x'.repeat(70000) + 'FINAL_CONCLUSION' : `回答:${text}`);
     send({ method: 'session/update', params: { sessionId: params.sessionId,
       update: { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'PRIVATE THOUGHT' } } } });
     if (text === 'slow') { active = { id }; return; }

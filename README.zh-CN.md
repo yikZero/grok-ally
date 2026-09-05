@@ -43,11 +43,13 @@ claude plugin install grok-ally@grok-ally
 | 工具 | 用途 |
 | --- | --- |
 | `grok_chat` | 开始或继续对话 |
-| `grok_status` | 查询结果，或列出项目中运行和最近结束的请求 |
+| `grok_status` | 跟进进度、读取完整结果，或查找最近的请求 |
 | `grok_cancel` | 取消当前请求 |
 | `grok_setup` | 检查本地 Grok 安装 |
 
 助手会传入项目路径，并保留会话 ID 用于追问。需要分享给 Grok 的上下文放在提示词中；插件不会自动导入 Codex 或 Claude 的聊天记录。
+
+长任务会持续显示最近的工具动作。回答先返回简短预览，助手可以分页取回全文，详见[结果与取消](docs/usage.md#results-and-cancellation)。
 
 默认禁止修改项目，明确授权编辑时才设置 `write: true`。Grok 仍可读取项目外的文件，使用自己的工具、钩子和网络配置。更多参数与权限说明见[使用参考](docs/usage.md#permissions-and-lifecycle)。
 

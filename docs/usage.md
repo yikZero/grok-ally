@@ -80,7 +80,7 @@ For a follow-up, add the returned `sessionId`. Omitting it starts an independent
 | `write` | `false` | `true` authorizes workspace edits |
 | `model` | Grok default | New sessions only |
 | `effort` | Grok default | New sessions only: `minimal`, `low`, `medium`, `high`, `xhigh` |
-| `waitSeconds` | `25` | Return after 0–25 seconds; the turn can keep running |
+| `waitSeconds` | `25` | Return after 0–60 seconds; the turn can keep running. Use more than 25 only if the host's tool timeout allows it |
 
 A live session keeps the same `cwd` and `write`. Omit `model` and `effort` when continuing. Start a separate conversation to change settings immediately.
 
@@ -90,7 +90,31 @@ Use an exact model ID from `grok models`. Available reasoning levels depend on t
 
 ## Results and cancellation
 
-A slow call returns a `requestId`. Call `grok_status` with that ID until the turn finishes; it also accepts `waitSeconds` from 0 to 25.
+A slow call returns a `requestId` and `revision`. Call `grok_status` with that ID until the turn finishes. Existing calls without `afterRevision` still wait for completion or the deadline. To return when progress changes, pass the last revision from that request:
+
+```json
+{ "requestId": "<returned UUID>", "afterRevision": 12, "waitSeconds": 25 }
+```
+
+Use the returned `revision` for the next query. Short event bursts are combined for up to 200 ms; completion and cancellation still wake the wait immediately. `changed: false` means no state change; it omits `text` and `tools` unless you explicitly request an output page. Changed replies contain only retained tools updated since that revision, so merge them by tool ID. Query without `afterRevision` to refresh the current tool snapshot. Revisions are per request, not per conversation.
+
+`finishedAt` records when the turn ended. `lastProgressAt` records the latest observed session initialization, assistant text, or tool event; polling and hidden reasoning do not advance it. Tools include first-observed `startedAt`, reported `finishedAt`, and `durationMs`. Titles and up to ten file locations are included, with common credential patterns redacted; thought streams and raw tool inputs/outputs are excluded.
+
+The tool list retains all active calls and the most recently updated 100 completed/failed calls. `toolSummary` includes total, failed, dropped, active, unfinished, and unconfirmed counts. If Grok ends a turn without finishing a tool, that tool becomes `unconfirmed` and retains its `reportedStatus`; it is also kept in the list. Its duration stops at the turn's finish time. This means the bridge did not receive a tool outcome; it neither proves success nor claims that a background process is still running. `completed` refers to Grok's turn, not independent acceptance of its work.
+
+### Read a complete answer
+
+`text` is a recent preview of up to **16,000 UTF-8 bytes**, so long replies retain their ending. `truncated: true` means that this response contains only part of the retained answer. Fetch the full answer with the same tool:
+
+```json
+{ "requestId": "<returned UUID>", "outputOffset": 0, "outputLimit": 16000 }
+```
+
+Append each page's `text` and continue from its `output.nextOffset` while `output.hasMore` is true. Offsets are UTF-8 bytes, not JavaScript character counts. Returned offsets preserve character boundaries. Pages accept 4–64,000 bytes and return immediately. After a turn is terminal, its text and offsets stay fixed until the result is evicted or the bridge exits.
+
+For incremental text while a turn runs, combine `afterRevision` with the last `output.nextOffset` as `outputOffset`. Existing unread text returns immediately; otherwise the call waits for new progress or completion. Retain your offset when a reply contains only `output.totalBytes`. `hasMore: false` means caught up with current output, not that the turn is finished. Without an explicit offset, new text returns as a recent preview.
+
+### Recover a request
 
 If you lose the request ID, call `grok_status` with `cwd` instead:
 
@@ -98,7 +122,7 @@ If you lose the request ID, call `grok_status` with `cwd` instead:
 { "cwd": "/absolute/path/to/project" }
 ```
 
-This immediately returns `active` and `recent` lists for that exact workspace in the current MCP process. All active requests and the 10 most recently finished requests are included, with recent results ordered by completion. Entries contain request/session IDs, status, write mode, and `createdAt`; message text and tool output are omitted. Use a returned `requestId` to read the result or cancel that request. Supply exactly one of `requestId` or `cwd`; `waitSeconds` only applies to individual requests. A bridge restart clears the lists.
+This immediately returns `active` and `recent` lists for that exact workspace in the current MCP process. All active requests and the 10 most recently finished requests are included, with recent results ordered by completion. Entries contain request/session IDs, status, write mode, revision, and timestamps; message text and tool output are omitted. Use a returned `requestId` to read the result or cancel that request. Supply exactly one of `requestId` or `cwd`; revision and paging options require a request ID. A bridge restart clears the lists.
 
 | Status | Meaning |
 | --- | --- |
@@ -123,7 +147,7 @@ Grok subagents are disabled in the bridge's child process with `GROK_SUBAGENTS=0
 The bridge reuses Grok Build authentication and account limits, without reading credential files or requiring a separate API key. `GROK_BINARY` overrides the executable; otherwise discovery checks PATH and `$GROK_HOME/bin/grok` (default `~/.grok/bin/grok`). `grok_setup` checks the binary and version; a successful chat verifies account access.
 
 - Up to four Grok processes stay available between turns. Idle sessions are released after five minutes or evicted to make room. Overlapping turns in the same resident session are rejected.
-- The current MCP process keeps the latest 100 turn results, with at most 64,000 response characters each. `truncated: true` means the answer was clipped. After a restart, use the session ID to continue; old request IDs are no longer available.
+- The current MCP process keeps up to 100 request results, evicting the oldest finished results first and preserving active requests. Full assistant text is stored in OS temporary directories (mode `0700`, files `0600`) outside the workspace, and is removed on result eviction or normal bridge shutdown. An abrupt process kill may leave temporary files for OS cleanup. If saving output fails, the turn fails and requests cancellation instead of silently losing its ending. After a restart, use the session ID to continue; old request IDs and pagination are no longer available.
 - Each turn has a one-hour ceiling. Cancellation uses ACP first, then terminates the process if it has not stopped within five seconds. Shutdown also cleans up descendants in Grok's process group, with a two-second grace period before forceful termination.
 - Host transcripts are not imported, credentials are not copied, and the bridge opens no network listener. Recursive bridge launches through Grok's MCP discovery are blocked.
 

@@ -2,6 +2,16 @@
 
 Validation date: 2026-09-05. Local machine: macOS arm64, Node 22.14.0. Grok Build: `1.0.13 (5e9a58528b76)`.
 
+## Version 0.5.0 long-task results
+
+Reproduced both 0.4.0 truncation defects locally: 105 tool calls retained only IDs 0–99, and a conclusion appended after 64,000 characters disappeared. The new bundled-server checks retain the newest calls out of 132, preserve active tools, count failed and dropped records, and mark missing terminal events as unconfirmed. A Unicode answer over 240 KB is reconstructed exactly through multiple MCP pages, including its final conclusion.
+
+Incremental checks cover progress-triggered returns, unchanged replies, tool-only updates, event-burst batching, terminal returns, cancellation, and draining unread output while a turn is still active. Temporary output permissions, eviction/shutdown cleanup, and failure on an injected storage error are verified separately.
+
+Real `grok-4.6` / `xhigh` completed two implementation turns in an isolated workspace with Chinese characters and spaces in its path: a JSONL status summarizer, then last-valid-record deduplication. Eleven independent acceptance checks passed across the two stages. A restarted MCP client loaded the same session and recalled a marker supplied only in conversation. Each answer was retrieved in 97-byte pages without lost or duplicated bytes. This live run also revealed overly frequent returns for tiny text chunks; the bridge now combines short bursts for up to 200 ms.
+
+The final bundled runtime was checked again against real Grok after batching was added. Context recall, incremental status, cancellation during tool activity, continuation after cancellation, and immediate unchanged terminal status all passed. Cancellation left one tool without a final native outcome; the bridge reported it as unconfirmed with zero active tools.
+
 ## Version 0.4.0 live-task review
 
 The real Grok runtime silently accepted a nonexistent model ID and answered with its default model. An explicit `minimal` effort request also selected `xhigh` on this installation. The bridge now checks Grok's session settings before sending the prompt. Both cases fail explicitly; `grok-4.6` with `xhigh` is accepted. Checks use the runtime's reported values, without hardcoded model lists.
@@ -34,7 +44,7 @@ The review reproduced and fixed two lifecycle issues: descendants surviving Grok
 
 ## Automated checks
 
-All twelve automated checks pass: eleven use the official MCP client against the **bundled server**, with an independent fake ACP executable; one checks cancellation of a status wait directly. Run them with `npm test`. Coverage includes:
+All eighteen automated checks pass: thirteen use the official MCP client against the **bundled server**, with an independent fake ACP executable; five check bridge state and output lifecycle directly. Run them with `npm test`. Coverage includes:
 
 - Schema errors, absolute workspace paths (including spaces/symlinks), separate conversations, explicit write mode, and one process/handshake for follow-up turns.
 - MCP restart and native session load, replay filtering, honest load failure, and reconnection after an idle child exits.
@@ -48,6 +58,8 @@ All twelve automated checks pass: eleven use the official MCP client against the
 - Explicit model/effort validation before prompting, for native model metadata and standard ACP configuration options.
 - Paragraph separation around tool calls, without splitting ordinary text chunks or losing the boundary on an empty chunk.
 - Rejection of the removed `maxTurns` argument and forced child-process subagent disabling even when the parent environment enables it.
+- Recent-tool retention beyond 100 calls, active/unconfirmed tool state, counts, timestamps, and stable durations after completion.
+- Exact Unicode output pagination, preserved final conclusions, incremental waits and burst batching, private temporary-file cleanup, and honest storage failures.
 
 ## Live Grok (0.1.1)
 
