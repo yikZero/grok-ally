@@ -27,7 +27,9 @@ async function fixture(t, previous) {
   const client = new Client({ name: 'bridge-test', version: '1' });
   await client.connect(transport);
   t.after(async () => { await client.close(); assert.equal(stderr, ''); });
-  const call = (name, args = {}, options) => client.callTool({ name, arguments: args }, undefined, options);
+  // Exercise the full diagnostic contract in the existing suite; compact defaults have separate checks below.
+  const call = (name, args = {}, options) => client.callTool({ name,
+    arguments: { ...(['grok_chat', 'grok_status', 'grok_cancel'].includes(name) ? { detail: 'full' } : {}), ...args } }, undefined, options);
   const events = () => readFileSync(log, 'utf8').trim().split('\n').map(line => JSON.parse(line));
   const chat = async args => (await call('grok_chat', { cwd, ...args })).structuredContent;
   return { cwd, client, call, events, chat };
@@ -53,6 +55,8 @@ test('official MCP client: schemas, same-process conversation, defaults and isol
   assert.equal(f.events().filter(e => e.event === 'spawn').length, 1);
   assert.equal(f.events().filter(e => e.method === 'initialize').length, 1);
   assert.equal(f.events().find(e => e.method === 'initialize').params.clientInfo.version, pkg.version);
+  assert.deepEqual(f.events().find(e => e.method === 'initialize').params._meta.bufferingSettings,
+    { maxItems: 100, maxBytes: 16384, maxDurationMs: 200 });
   assert.equal(f.events().filter(e => e.method === 'session/load').length, 0);
   const spawn = f.events()[0];
   assert.equal(spawn.cwd, realpathSync(f.cwd));
@@ -278,4 +282,57 @@ test('full Unicode output pages reconstruct every chunk and final answer over MC
   assert.equal(unchanged.text, undefined);
   assert.equal(unchanged.tools, undefined);
   assert.equal((await read({ afterRevision: result.revision + 1 })).isError, true);
+});
+
+test('compact defaults keep status useful without streaming text or full tool history', async t => {
+  const f = await fixture(t);
+  const call = async (name, args) => {
+    const result = await f.client.callTool({ name, arguments: args });
+    assert.deepEqual(JSON.parse(result.content[0].text), result.structuredContent);
+    return result;
+  };
+  let job = (await call('grok_chat', { cwd: f.cwd, prompt: 'slow', waitSeconds: 0 })).structuredContent;
+  while (!job.sessionId || job.status === 'starting') {
+    job = (await call('grok_status', { requestId: job.requestId, afterRevision: job.revision })).structuredContent;
+  }
+  assert.equal(job.text, undefined);
+  assert.equal(job.tools, undefined);
+  assert.equal(job.cwd, undefined);
+  assert.ok(job.toolSummary);
+  assert.ok(job.lastProgressAt);
+  const full = (await call('grok_status', { requestId: job.requestId, detail: 'full', waitSeconds: 0 })).structuredContent;
+  assert.equal(full.text, '回答:slow');
+  assert.equal(full.cwd, realpathSync(f.cwd));
+  const unchanged = (await call('grok_status', { requestId: job.requestId, afterRevision: full.revision, waitSeconds: 0 })).structuredContent;
+  assert.deepEqual(Object.keys(unchanged).sort(), ['changed', 'requestId', 'revision', 'sessionId', 'status']);
+  await call('grok_cancel', { requestId: job.requestId });
+  const cancelled = (await call('grok_status', { requestId: job.requestId })).structuredContent;
+  assert.equal(cancelled.status, 'cancelled');
+  assert.equal(cancelled.text, '回答:slow');
+  assert.ok(cancelled.finishedAt);
+  const incomplete = await call('grok_chat', { cwd: f.cwd, prompt: 'limit' });
+  assert.equal(incomplete.isError, true);
+  assert.equal(incomplete.structuredContent.status, 'incomplete');
+  assert.equal(incomplete.structuredContent.text, '回答:limit');
+});
+
+test('compact answers and pages preserve all text without repeating diagnostic history', async t => {
+  const f = await fixture(t);
+  const result = await f.chat({ prompt: 'many-tools', detail: 'compact' });
+  assert.equal(result.status, 'completed');
+  assert.equal(result.text, 'All done.');
+  assert.equal(result.tools, undefined);
+  assert.equal(result.toolSummary.total, 132);
+  assert.equal(result.toolSummary.unconfirmed, 1);
+  const full = (await f.call('grok_status', { requestId: result.requestId, detail: 'full' })).structuredContent;
+  assert.equal(full.tools.length, 101);
+  const page = (await f.call('grok_status', { requestId: result.requestId, outputOffset: 0, detail: 'compact' })).structuredContent;
+  assert.equal(page.text, result.text);
+  assert.equal(page.tools, undefined);
+  assert.equal(page.toolSummary, undefined);
+  assert.ok(Buffer.byteLength(JSON.stringify(result)) < Buffer.byteLength(JSON.stringify(full)) / 10);
+  const failed = await f.chat({ prompt: 'error', detail: 'compact' });
+  assert.equal(failed.status, 'failed');
+  assert.ok(failed.error);
+  assert.doesNotMatch(failed.error, /fake-secret/);
 });

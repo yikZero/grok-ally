@@ -2,6 +2,14 @@
 
 Validation date: 2026-09-05. Local machine: macOS arm64, Node 22.14.0. Grok Build: `1.0.13 (5e9a58528b76)`.
 
+## Version 0.6.0 response efficiency
+
+Compact-mode integration checks verify that running text and historical tools are omitted by default, full diagnostics remain available, unchanged replies are small, pagination retains all text, and failures/incomplete turns remain explicit. Text and structured MCP results are checked for equality. The native buffering request is verified at the fake ACP boundary.
+
+A real paired Grok check returned the identical 30-line, 1,109-byte Chinese answer with and without native buffering. Assistant text events decreased from 329 to 20. The deterministic response fixture reconstructs the same 184,025 answer bytes in both versions and measures running, unchanged, and paginated responses separately. See [efficiency research and measurements](efficiency.md) for sources, reproduction, and the limits of the token estimates.
+
+A real read-only review through the final 0.6.0 bundle exercised four native tools, followed by a question in the same session. Both turns completed and retained the conversation marker; the reviewed file's hash stayed unchanged. The review took about 128 seconds and required five status calls after the initial chat, with 2,952 serialized text bytes across those six replies. Full diagnostics and 127-byte output pages returned the same answer. These are individual observations, not a latency or billing benchmark.
+
 ## Version 0.5.0 long-task results
 
 Reproduced both 0.4.0 truncation defects locally: 105 tool calls retained only IDs 0–99, and a conclusion appended after 64,000 characters disappeared. The new bundled-server checks retain the newest calls out of 132, preserve active tools, count failed and dropped records, and mark missing terminal events as unconfirmed. A Unicode answer over 240 KB is reconstructed exactly through multiple MCP pages, including its final conclusion.
@@ -44,7 +52,7 @@ The review reproduced and fixed two lifecycle issues: descendants surviving Grok
 
 ## Automated checks
 
-All eighteen automated checks pass: thirteen use the official MCP client against the **bundled server**, with an independent fake ACP executable; five check bridge state and output lifecycle directly. Run them with `npm test`. Coverage includes:
+All twenty automated checks pass: fifteen use the official MCP client against the **bundled server**, with an independent fake ACP executable; five check bridge state and output lifecycle directly. Run them with `npm test`. Coverage includes:
 
 - Schema errors, absolute workspace paths (including spaces/symlinks), separate conversations, explicit write mode, and one process/handshake for follow-up turns.
 - MCP restart and native session load, replay filtering, honest load failure, and reconnection after an idle child exits.
@@ -60,6 +68,7 @@ All eighteen automated checks pass: thirteen use the official MCP client against
 - Rejection of the removed `maxTurns` argument and forced child-process subagent disabling even when the parent environment enables it.
 - Recent-tool retention beyond 100 calls, active/unconfirmed tool state, counts, timestamps, and stable durations after completion.
 - Exact Unicode output pagination, preserved final conclusions, incremental waits and burst batching, private temporary-file cleanup, and honest storage failures.
+- Compact status defaults, equivalent full diagnostics, small unchanged responses, pages without repeated tool history, and native buffering metadata.
 
 ## Live Grok (0.1.1)
 

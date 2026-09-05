@@ -36,6 +36,8 @@ Codex and Claude package the same generated runtime with their own marketplace/m
 
 The bridge focuses on text conversation and review. Planning, media, document generation, transcript import, workflow orchestration, and remote service hosting remain outside the bridge.
 
+For compact result projection, completion-oriented waits, and Grok's native text buffering, see the [efficiency research](efficiency.md). These changes preserve the same four-tool transport and retained answers.
+
 ## Lessons from codex-plugin-cc
 
 Reviewed OpenAI's [codex-plugin-cc](https://github.com/openai/codex-plugin-cc/tree/db52e28f4d9ded852ab3942cea316258ae4ef346) at commit `db52e28` on 2026-09-05. It exposes Claude commands, an agent, and hooks over Codex app-server. Its command count is not an MCP tool count.

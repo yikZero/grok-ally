@@ -49,7 +49,7 @@ For code review, ask **“Use Grok to review my uncommitted changes.”** The `g
 
 The agent supplies your project path and keeps the returned session ID for follow-ups. Share the context you want Grok to see in the prompt; host chat history is not imported automatically.
 
-Long tasks keep showing recent tool activity. Answers include a short preview; the agent can retrieve the full text in pages. See [results and cancellation](docs/usage.md#results-and-cancellation).
+Long tasks return compact progress by default, then the answer when finished. Detailed tool history and full text remain available on demand. See [results and cancellation](docs/usage.md#results-and-cancellation) and [efficiency measurements](docs/efficiency.md).
 
 Workspace writes are disabled by default. Set `write: true` only for authorized edits. Grok can still read outside the workspace and use its own tools, hooks, and network settings. See [permissions and lifecycle](docs/usage.md#permissions-and-lifecycle) for details.
 

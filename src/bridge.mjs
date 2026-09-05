@@ -171,22 +171,38 @@ export class Bridge {
       recent: jobs.filter(job => !RUNNING.has(job.status)).slice(0, 10) };
   }
 
-  snapshot(job, { afterRevision, outputOffset, outputLimit } = {}) {
+  snapshot(job, { afterRevision, outputOffset, outputLimit, detail = 'full' } = {}) {
     const active = job.tools.filter(t => ACTIVE_TOOL.has(t.status));
     const changed = afterRevision === undefined || job.revision > afterRevision;
+    const compact = detail === 'compact';
+    const paging = outputOffset !== undefined;
     const data = { requestId: job.requestId, sessionId: job.sessionId, status: job.status,
-      cwd: job.cwd, write: job.write, createdAt: job.createdAt, finishedAt: job.finishedAt,
-      lastProgressAt: job.lastProgressAt, revision: job.revision, changed,
-      toolSummary: { ...job.toolTotals, active: active.length,
-        unfinished: active.length + job.toolTotals.unconfirmed, dropped: job.toolTotals.total - job.tools.length },
+      revision: job.revision, changed,
       ...(job.stopReason ? { stopReason: job.stopReason } : {}),
       ...(job.error ? { error: job.error } : {}) };
-    if (changed) data.tools = job.tools.filter(tool => afterRevision === undefined || tool.revision > afterRevision)
-      .map(({ revision, ...tool }) => ({ ...tool,
-        durationMs: Math.max(0, Date.parse(tool.finishedAt || job.finishedAt || now()) - Date.parse(tool.startedAt)) }));
-    if (outputOffset !== undefined || afterRevision === undefined || job.textRevision > afterRevision) {
+    const duration = started => Math.max(0, Date.parse(job.finishedAt || now()) - Date.parse(started));
+    if (!compact) Object.assign(data, { cwd: job.cwd, write: job.write, createdAt: job.createdAt,
+      finishedAt: job.finishedAt, lastProgressAt: job.lastProgressAt });
+    if (!compact || (changed && !paging)) {
+      data.toolSummary = { ...job.toolTotals, active: active.length,
+        unfinished: active.length + job.toolTotals.unconfirmed, dropped: job.toolTotals.total - job.tools.length };
+    }
+    if (compact && changed && !paging) {
+      data.elapsedMs = duration(job.createdAt);
+      data.lastProgressAt = job.lastProgressAt;
+      if (job.finishedAt) data.finishedAt = job.finishedAt;
+      if (active.length) data.currentTools = active.slice(0, 3).map(tool => ({ id: tool.id,
+        title: tool.title, status: tool.status, durationMs: duration(tool.startedAt) }));
+    } else if (!compact && changed) {
+      data.tools = job.tools.filter(tool => afterRevision === undefined || tool.revision > afterRevision)
+        .map(({ revision, ...tool }) => ({ ...tool,
+          durationMs: tool.finishedAt ? Math.max(0, Date.parse(tool.finishedAt) - Date.parse(tool.startedAt)) : duration(tool.startedAt) }));
+    }
+    const includeText = paging || ((!compact || !RUNNING.has(job.status))
+      && (afterRevision === undefined || (compact ? changed : job.textRevision > afterRevision)));
+    if (includeText) {
       Object.assign(data, job.output.page(outputOffset, outputLimit));
-    } else data.output = { totalBytes: job.output.totalBytes };
+    } else if (!compact || changed) data.output = { totalBytes: job.output.totalBytes };
     return data;
   }
 
@@ -242,7 +258,7 @@ export class Bridge {
     }
   }
 
-  cancel(id) {
+  cancel(id, query) {
     const job = this.get(id);
     if (RUNNING.has(job.status) && job.status !== 'cancelling') {
       job.status = 'cancelling';
@@ -251,7 +267,7 @@ export class Bridge {
       else this.drop(job.session);
       job.cancelTimer = setTimeout(() => this.drop(job.session), this.cancelMs);
     }
-    return this.snapshot(job);
+    return this.snapshot(job, query);
   }
 
   drop(session) {

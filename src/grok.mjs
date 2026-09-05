@@ -80,6 +80,8 @@ export class GrokSession {
     try {
       const init = await this.connection.agent.request('initialize', {
         protocolVersion: 1, clientCapabilities: {}, clientInfo: { name: 'grok-ally', version: pkg.version },
+        // Grok's ReplayBuffer batches text upstream; tool boundaries and prompt completion flush it.
+        _meta: { bufferingSettings: { maxItems: 100, maxBytes: 16384, maxDurationMs: 200 } },
       });
       if (init.protocolVersion !== 1) throw new Error('Grok did not negotiate ACP v1.');
       const params = { cwd: this.options.cwd, mcpServers: [] };

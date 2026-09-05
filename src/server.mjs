@@ -14,6 +14,7 @@ if (process.env.GROK_ALLY_ACTIVE === '1') {
 const bridge = new Bridge();
 const server = new McpServer({ name: 'grok-ally', version: pkg.version });
 const waitSeconds = z.number().int().min(0).max(60).default(25);
+const detail = z.enum(['compact', 'full']).default('compact').describe('Compact status by default; full adds workspace metadata, tool history, and running text.');
 const requestId = z.string().uuid();
 const result = data => ({ content: [{ type: 'text', text: JSON.stringify(data) }],
   structuredContent: data, isError: data.status === 'failed' || data.status === 'incomplete' });
@@ -23,7 +24,7 @@ const handle = fn => async (...args) => {
 };
 
 server.registerTool('grok_chat', {
-  description: 'Send a message to Grok Build. Omit sessionId to start; pass the returned sessionId to continue. Always supply the real workspace cwd. Default read-only; write=true authorizes workspace edits. If status is starting/running, poll grok_status with requestId. No host transcript is imported.',
+  description: 'Start or continue Grok Build using the real project cwd. Default read-only; write=true authorizes edits. Keep sessionId for follow-ups. Poll unfinished requests with grok_status; host chat history is not imported.',
   inputSchema: z.object({
     prompt: z.string().trim().min(1).max(100000),
     cwd: z.string().min(1),
@@ -32,17 +33,19 @@ server.registerTool('grok_chat', {
     model: z.string().min(1).max(200).optional().describe('New sessions only. Exact model ID from grok models; omit for the native default.'),
     effort: z.enum(['minimal', 'low', 'medium', 'high', 'xhigh']).optional().describe('New sessions only. Must be honored by the selected Grok model.'),
     waitSeconds,
+    detail,
   }).strict(),
   annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
-}, handle((input, extra) => bridge.wait(bridge.start(input), input.waitSeconds, extra, true)));
+}, handle((input, extra) => bridge.wait(bridge.start(input), input.waitSeconds, extra, true, { detail: input.detail })));
 
 server.registerTool('grok_status', {
-  description: 'Read a turn by requestId. Pass its last revision as afterRevision to wait for changes; unchanged replies omit text/tools. Default 25 seconds, at most 60 if the host timeout allows. Text is a recent preview; use outputOffset=0, then output.nextOffset to page the full answer. Pass cwd instead to list active and 10 recent requests. Results last only in this MCP process; keep sessionId for follow-ups.',
+  description: 'Wait for a turn to finish (default 25s), then return its answer. Running replies are compact; use detail=full for diagnostics or afterRevision for early progress returns. Page long answers with outputOffset. Use cwd instead of requestId to find active/recent requests. Results expire when this MCP process exits.',
   inputSchema: z.object({ requestId: requestId.optional(),
     cwd: z.string().min(1).optional().describe('Absolute workspace path. Use instead of requestId to find requests.'),
     waitSeconds,
-    afterRevision: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional().describe('Last revision from this request; wakes on progress or completion.'),
-    outputOffset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional().describe('UTF-8 byte offset. Start at 0; continue with output.nextOffset. Pages return immediately unless afterRevision is also supplied.'),
+    detail,
+    afterRevision: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional().describe('Opt into progress-triggered returns using the last revision; omit to wait for completion.'),
+    outputOffset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional().describe('Read full text from UTF-8 byte offset 0, then output.nextOffset while hasMore. Pages return immediately.'),
     outputLimit: z.number().int().min(4).max(64000).optional().describe('Page size in UTF-8 bytes; default 16000. Use with outputOffset.'),
   }).strict(),
   annotations: { readOnlyHint: true, openWorldHint: false },
@@ -57,9 +60,9 @@ server.registerTool('grok_status', {
 
 server.registerTool('grok_cancel', {
   description: 'Cancel a Grok turn through ACP. Returns cancelling until Grok stops; use grok_status to confirm. Existing edits are not rolled back.',
-  inputSchema: z.object({ requestId }).strict(),
+  inputSchema: z.object({ requestId, detail }).strict(),
   annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
-}, handle(input => bridge.cancel(input.requestId)));
+}, handle(input => bridge.cancel(input.requestId, { detail: input.detail })));
 
 server.registerTool('grok_setup', {
   description: 'Check the locally installed Grok Build binary and version. Does not read credentials or claim that authentication was verified.',

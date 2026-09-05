@@ -2,6 +2,21 @@
 
 Notable changes for users. Each release uses the notes below.
 
+## [0.6.0] - 2026-09-05
+
+Spend less context following Grok tasks.
+
+### Changed
+
+- Chat, status, and cancellation now return compact results by default. Running replies show counts and current tools; finished replies include the answer.
+- Use `detail: "full"` for the previous diagnostic fields, tool history, and running text. Full answers remain available through pagination.
+- Conversation guidance waits for completion by default and requests detailed progress only when needed.
+
+### Fixed
+
+- Output pages no longer repeat tool history in compact mode.
+- Enable Grok's native text buffering to reduce small stream events without changing the answer or model settings.
+
 ## [0.5.0] - 2026-09-05
 
 Follow long tasks and retrieve their complete answers.
