@@ -1,12 +1,32 @@
 import { randomUUID } from 'node:crypto';
 import { GrokSession, safeError, workspace } from './grok.mjs';
+import { ToolHistory, HISTORY_PAGE } from './history.mjs';
 import { Output } from './output.mjs';
 
 const RUNNING = new Set(['starting', 'running', 'cancelling']);
 const ACTIVE_TOOL = new Set(['pending', 'in_progress']);
 const MAX_RECENT_TOOLS = 100;
+const FAILURE_REASON_CHARS = 240;
 const now = () => new Date().toISOString();
-const title = value => safeError(String(value || 'tool')).replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 200);
+const clip = (value, max) => safeError(String(value ?? '')).replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, max);
+const title = value => clip(value || 'tool', 200);
+
+function failureExcerpt(content) {
+  if (!Array.isArray(content)) return;
+  const parts = [];
+  for (const item of content) {
+    const block = item?.type === 'content' ? item.content : undefined;
+    if (block?.type === 'text' && block.text) parts.push(String(block.text));
+  }
+  if (!parts.length) return;
+  const text = clip(parts.join(' '), FAILURE_REASON_CHARS).trim();
+  return text || undefined;
+}
+
+function fingerprint(tool) {
+  return JSON.stringify({ id: tool.id, title: tool.title, status: tool.status, kind: tool.kind ?? null,
+    locations: tool.locations ?? null, reportedStatus: tool.reportedStatus ?? null, reason: tool.reason ?? null });
+}
 
 export class Bridge {
   constructor({ Session = GrokSession, idleMs = 300000, turnMs = 3600000, cancelMs = 5000 } = {}) {
@@ -43,10 +63,11 @@ export class Bridge {
     }
     for (const [id, job] of this.jobs) {
       if (this.jobs.size < 100) break;
-      if (!RUNNING.has(job.status)) { job.output.close(); this.jobs.delete(id); }
+      if (!RUNNING.has(job.status)) { this.release(job); this.jobs.delete(id); }
     }
     const job = { requestId: randomUUID(), sessionId: session.sessionId || null, status: 'starting',
-      output: new Output(), tools: [], toolTotals: { total: 0, failed: 0, unconfirmed: 0 },
+      output: new Output(), history: new ToolHistory(), tools: [], toolsById: new Map(), toolFingerprints: new Map(),
+      toolTotals: { total: 0, failed: 0, unconfirmed: 0 }, latestFailure: null,
       revision: 1, textRevision: 0, waiters: new Set(), session, cwd: options.cwd, write: options.write,
       createdAt: now(), finishedAt: null, lastProgressAt: now() };
     session.busy = job;
@@ -83,12 +104,21 @@ export class Bridge {
       clearTimeout(job.cancelTimer);
       job.finishedAt = now();
       // A terminal prompt does not prove that a missing tool completion succeeded.
+      const pending = [];
       for (const tool of job.tools) {
         if (!ACTIVE_TOOL.has(tool.status)) continue;
         tool.reportedStatus = tool.status;
         tool.status = 'unconfirmed';
         tool.revision = job.revision + 1;
         job.toolTotals.unconfirmed++;
+        pending.push(tool);
+      }
+      for (const tool of pending) {
+        try { this.recordHistory(job, tool); }
+        catch (error) {
+          job.status = 'failed';
+          job.error ??= `Could not retain tool history: ${safeError(error)}`;
+        }
       }
       this.pruneTools(job);
       this.touch(job, false);
@@ -110,19 +140,17 @@ export class Bridge {
       const separator = job.separateText && job.output.totalBytes && job.output.ending !== '\n\n' ? '\n\n' : '';
       try { job.output.append(separator + update.content.text); }
       catch (error) {
-        job.outputError = true;
-        job.error = `Could not retain complete output: ${safeError(error)}`;
-        this.cancel(job.requestId);
+        this.failRetain(job, 'complete output', error);
         return;
       }
       job.separateText = false;
       job.textRevision = job.revision + 1;
     } else if (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') {
-      let tool = job.tools.find(t => t.id === update.toolCallId);
+      let tool = job.toolsById.get(update.toolCallId);
       if (!tool) {
         if (update.sessionUpdate !== 'tool_call') return;
         tool = { id: update.toolCallId, title: 'tool', status: 'pending', startedAt: now(), finishedAt: null };
-        job.tools.push(tool);
+        job.toolsById.set(tool.id, tool);
         job.toolTotals.total++;
       }
       job.separateText = true;
@@ -133,15 +161,50 @@ export class Bridge {
         ({ path: title(path), ...(line != null ? { line } : {}) }));
       if (update.status != null) tool.status = update.status;
       if (tool.status === 'failed') job.toolTotals.failed++;
+      if (tool.status !== 'failed') delete tool.reason;
+      if (update.status === 'failed') {
+        const reason = failureExcerpt(update.content);
+        if (reason) tool.reason = reason;
+        job.latestFailure = { id: tool.id, title: tool.title,
+          ...(tool.reason ? { reason: tool.reason } : {}), recovery: 'unknown' };
+      } else if (update.status === 'completed' && job.latestFailure?.id === tool.id) {
+        job.latestFailure = { ...job.latestFailure, recovery: 'completed' };
+      }
       tool.finishedAt = ACTIVE_TOOL.has(tool.status) ? null : tool.finishedAt || now();
       tool.revision = job.revision + 1;
       // Keep the most recently updated completed calls, plus every active call.
-      job.tools.splice(job.tools.indexOf(tool), 1);
+      const index = job.tools.indexOf(tool);
+      if (index >= 0) job.tools.splice(index, 1);
       job.tools.push(tool);
       this.pruneTools(job);
+      try { this.recordHistory(job, tool); }
+      catch (error) {
+        this.failRetain(job, 'tool history', error);
+        return;
+      }
     } else return;
     this.touch(job);
     // Thought streams and raw tool inputs/outputs are not part of the chat result.
+  }
+
+  recordHistory(job, tool) {
+    const next = fingerprint(tool);
+    if (job.toolFingerprints.get(tool.id) === next) return;
+    job.history.append({
+      record: job.history.totalRecords, id: tool.id, title: tool.title, status: tool.status,
+      ...(tool.kind != null ? { kind: tool.kind } : {}),
+      ...(tool.locations?.length ? { locations: tool.locations } : {}),
+      ...(tool.reportedStatus ? { reportedStatus: tool.reportedStatus } : {}),
+      startedAt: tool.startedAt, ...(tool.finishedAt ? { finishedAt: tool.finishedAt } : {}),
+      ...(tool.reason ? { reason: tool.reason } : {}),
+    });
+    job.toolFingerprints.set(tool.id, next);
+  }
+
+  failRetain(job, what, error) {
+    job.outputError = true;
+    job.error = `Could not retain ${what}: ${safeError(error)}`;
+    this.cancel(job.requestId);
   }
 
   pruneTools(job) {
@@ -154,6 +217,11 @@ export class Bridge {
     job.revision++;
     if (progress) job.lastProgressAt = now();
     for (const wake of job.waiters) wake();
+  }
+
+  release(job) {
+    job.output.close();
+    job.history.close();
   }
 
   get(id) {
@@ -171,21 +239,31 @@ export class Bridge {
       recent: jobs.filter(job => !RUNNING.has(job.status)).slice(0, 10) };
   }
 
-  snapshot(job, { afterRevision, outputOffset, outputLimit, detail = 'full' } = {}) {
+  snapshot(job, query = {}) {
+    let { afterRevision, outputOffset, outputLimit, toolOffset, toolLimit, detail = 'full' } = query;
+    if (outputLimit !== undefined && outputOffset === undefined) outputOffset = 0;
+    if (toolLimit !== undefined && toolOffset === undefined) toolOffset = 0;
     const active = job.tools.filter(t => ACTIVE_TOOL.has(t.status));
+    const unconfirmed = job.tools.filter(t => t.status === 'unconfirmed');
+    const state = active.length ? 'active' : unconfirmed.length ? 'unconfirmed' : 'confirmed';
     const changed = afterRevision === undefined || job.revision > afterRevision;
     const compact = detail === 'compact';
-    const paging = outputOffset !== undefined;
+    const outputPaging = outputOffset !== undefined;
+    const toolPaging = toolOffset !== undefined;
+    const paging = outputPaging || toolPaging;
     const data = { requestId: job.requestId, sessionId: job.sessionId, status: job.status,
       revision: job.revision, changed,
       ...(job.stopReason ? { stopReason: job.stopReason } : {}),
       ...(job.error ? { error: job.error } : {}) };
+    if (toolPaging) return Object.assign(data, job.history.page(toolOffset, toolLimit ?? HISTORY_PAGE));
     const duration = started => Math.max(0, Date.parse(job.finishedAt || now()) - Date.parse(started));
     if (!compact) Object.assign(data, { cwd: job.cwd, write: job.write, createdAt: job.createdAt,
       finishedAt: job.finishedAt, lastProgressAt: job.lastProgressAt });
     if (!compact || (changed && !paging)) {
       data.toolSummary = { ...job.toolTotals, active: active.length,
-        unfinished: active.length + job.toolTotals.unconfirmed, dropped: job.toolTotals.total - job.tools.length };
+        unfinished: active.length + job.toolTotals.unconfirmed, dropped: job.toolTotals.total - job.tools.length,
+        state, historyRecords: job.history?.totalRecords ?? 0 };
+      if (job.latestFailure) data.latestFailure = job.latestFailure;
     }
     if (compact && changed && !paging) {
       data.elapsedMs = duration(job.createdAt);
@@ -193,12 +271,16 @@ export class Bridge {
       if (job.finishedAt) data.finishedAt = job.finishedAt;
       if (active.length) data.currentTools = active.slice(0, 3).map(tool => ({ id: tool.id,
         title: tool.title, status: tool.status, durationMs: duration(tool.startedAt) }));
+      if (!RUNNING.has(job.status) && unconfirmed.length) {
+        data.unconfirmedTools = unconfirmed.slice(0, 3).map(tool => ({
+          id: tool.id, title: tool.title, reportedStatus: tool.reportedStatus }));
+      }
     } else if (!compact && changed) {
       data.tools = job.tools.filter(tool => afterRevision === undefined || tool.revision > afterRevision)
         .map(({ revision, ...tool }) => ({ ...tool,
           durationMs: tool.finishedAt ? Math.max(0, Date.parse(tool.finishedAt) - Date.parse(tool.startedAt)) : duration(tool.startedAt) }));
     }
-    const includeText = paging || ((!compact || !RUNNING.has(job.status))
+    const includeText = outputPaging || ((!compact || !RUNNING.has(job.status))
       && (afterRevision === undefined || (compact ? changed : job.textRevision > afterRevision)));
     if (includeText) {
       Object.assign(data, job.output.page(outputOffset, outputLimit));
@@ -208,11 +290,15 @@ export class Bridge {
 
   async wait(job, seconds = 25, extra, cancelOnAbort = false, query = {}) {
     if (query.afterRevision > job.revision) throw new Error('afterRevision is newer than this request. Use its last returned revision.');
-    if (query.outputOffset > job.output.totalBytes) throw new Error('outputOffset must be between 0 and output.totalBytes.');
-    if (!RUNNING.has(job.status)
-      || (query.outputOffset !== undefined && (query.afterRevision === undefined
-        || (query.afterRevision === job.revision && query.outputOffset < job.output.totalBytes)))) {
-      return this.snapshot(job, query);
+    let { outputOffset, outputLimit, toolOffset, toolLimit } = query;
+    if (outputLimit !== undefined && outputOffset === undefined) outputOffset = 0;
+    if (toolLimit !== undefined && toolOffset === undefined) toolOffset = 0;
+    if (outputOffset > job.output.totalBytes) throw new Error('outputOffset must be between 0 and output.totalBytes.');
+    if (toolOffset > (job.history?.totalRecords ?? 0)) throw new Error('toolOffset must be between 0 and toolHistory.totalRecords.');
+    const outputReady = outputOffset !== undefined && (query.afterRevision === undefined
+      || (query.afterRevision === job.revision && outputOffset < job.output.totalBytes));
+    if (!RUNNING.has(job.status) || outputReady || toolOffset !== undefined) {
+      return this.snapshot(job, { ...query, outputOffset, toolOffset });
     }
     let timer;
     let changeTimer;
@@ -278,6 +364,6 @@ export class Bridge {
 
   close() {
     for (const session of this.sessions) this.drop(session);
-    for (const job of this.jobs.values()) job.output.close();
+    for (const job of this.jobs.values()) this.release(job);
   }
 }

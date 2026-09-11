@@ -91,7 +91,7 @@ Use an exact model ID from `grok models`. Available reasoning levels depend on t
 
 ## Results and cancellation
 
-A slow call returns a `requestId` and `revision`. For ordinary tasks, call `grok_status` with that ID and omit `afterRevision`: it waits for completion or the deadline, without returning for every stream event.
+A slow call returns a `requestId` and `revision`. For ordinary tasks, call `grok_status` with that ID and omit `afterRevision`: it waits for completion or the deadline, without returning for every stream event. `waitSeconds` still defaults to 25 and is capped at 60. Passing `afterRevision` is an opt-in progress cursor: it wakes on observed progress (short bursts are still combined for up to 200 ms) and can increase polling. A large status-call count with that cursor does not prove transport slowness.
 
 ```json
 { "requestId": "<returned UUID>", "waitSeconds": 25 }
@@ -99,7 +99,7 @@ A slow call returns a `requestId` and `revision`. For ordinary tasks, call `grok
 
 Version **0.6.0** defaults to `detail: "compact"` on chat, status, and cancellation. Running replies include tool counts, elapsed time, recent activity, output size, and up to three current tools. They omit assistant text and historical tools. Terminal replies include the answer preview, stop reason, and any error. Add `detail: "full"` if a manual integration needs the previous `cwd`, `write`, `createdAt`, `tools`, or running `text` fields. The retained result is the same in both modes.
 
-When you need progress-triggered returns, pass the last revision from that request:
+When you need those early progress returns, pass the last revision from that request:
 
 ```json
 { "requestId": "<returned UUID>", "afterRevision": 12, "waitSeconds": 25 }
@@ -109,7 +109,11 @@ Use the returned `revision` for the next query. Short event bursts are combined 
 
 `finishedAt` records when the turn ended. `lastProgressAt` records the latest observed session initialization, assistant text, or tool event; polling and hidden reasoning do not advance it. Full tool records include first-observed `startedAt`, reported `finishedAt`, and `durationMs`. Titles and up to ten file locations are included, with common credential patterns redacted; thought streams and raw tool inputs/outputs are excluded.
 
-The tool list retains all active calls and the most recently updated 100 completed/failed calls. `toolSummary` includes total, failed, dropped, active, unfinished, and unconfirmed counts. If Grok ends a turn without finishing a tool, that tool becomes `unconfirmed` and retains its `reportedStatus`; it is also kept in the list. Its duration stops at the turn's finish time. This means the bridge did not receive a tool outcome; it neither proves success nor claims that a background process is still running. `completed` refers to Grok's turn, not independent acceptance of its work.
+The recent tool list retains all active calls and the most recently updated 100 completed/failed calls. `toolSummary` includes total, failed, dropped, active, unfinished, and unconfirmed counts, plus `state` and `historyRecords`. `dropped` is the number removed from that recent view, not missing execution; the complete sanitized history remains pageable. `state` is `active` if any observed tool is still running, otherwise `unconfirmed` if any lack a final reported outcome, otherwise `confirmed`. `confirmed` includes failed tools and does not mean tests passed or that the host accepted the work.
+
+If Grok ends a turn without finishing a tool, that tool becomes `unconfirmed` and retains its `reportedStatus`; it is also kept in the recent list. Compact terminal replies include up to three `unconfirmedTools` (`id`, `title`, `reportedStatus`). Duration stops at the turn's finish time. This means the bridge did not receive a tool outcome; it neither proves success nor claims that a background process is still running. `status: completed` is Grok's `end_turn`. It is not `toolSummary.state`, and neither is independent validation.
+
+When a tool reports `failed`, compact replies include `latestFailure` with `id`, `title`, `recovery`, and a short sanitized `reason` only when Grok provided text in that failure's `content`. Reasons are clipped to about 240 characters with control characters and known credential patterns removed; raw tool input/output and thoughts are not retained. The snapshot is kept even after the tool leaves the recent view. `recovery` stays `unknown` unless that same tool ID later reports `completed`. Another tool succeeding, or the turn reaching `end_turn`, is not treated as recovery. A historical failed attempt is not a turn `error`.
 
 ### Read a complete answer
 
@@ -119,7 +123,17 @@ Terminal `text` is a recent preview of up to **16,000 UTF-8 bytes**, so long rep
 { "requestId": "<returned UUID>", "outputOffset": 0, "outputLimit": 16000 }
 ```
 
-Append each page's `text` and continue from its `output.nextOffset` while `output.hasMore` is true. Compact pages contain the answer and paging metadata without repeated tool history. Offsets are UTF-8 bytes, not JavaScript character counts. Returned offsets preserve character boundaries. Pages accept 4–64,000 bytes and return immediately when requested without `afterRevision`. After a turn is terminal, its text and offsets stay fixed until the result is evicted or the bridge exits.
+`outputLimit` without `outputOffset` starts at 0. Append each page's `text` and continue from its `output.nextOffset` while `output.hasMore` is true. Compact pages contain the answer and paging metadata without repeated tool history. Offsets are UTF-8 bytes, not JavaScript character counts. Returned offsets preserve character boundaries. Pages accept 4–64,000 bytes and return immediately when requested without `afterRevision`. After a turn is terminal, its text and offsets stay fixed until the result is evicted or the bridge exits.
+
+### Read tool history
+
+Sanitized tool-state snapshots (status and metadata changes, including final `unconfirmed` transitions) are stored privately with the request. Page them through the same `grok_status` tool. `toolOffset` is a stable append-only record cursor; `toolLimit` defaults to 20 and is capped at 100; `toolLimit` alone starts at 0. Each page also stops at **16,000 UTF-8 bytes** of `toolHistory` metadata and records:
+
+```json
+{ "requestId": "<returned UUID>", "toolOffset": 0, "toolLimit": 20 }
+```
+
+Continue from `toolHistory.nextOffset` while `toolHistory.hasMore` is true. A page may contain fewer than `toolLimit` records when the byte cap is reached; the cursor still advances. History pages return immediately and omit the answer and recent-tool list. Do not mix `outputOffset`/`outputLimit` with `toolOffset`/`toolLimit`. Records never include raw tool input/output or thoughts. A storage failure fails the turn instead of silently dropping history. Files are removed on result eviction or normal bridge shutdown.
 
 For incremental text while a turn runs, start at `outputOffset: 0`, then combine `afterRevision` with the last `output.nextOffset` as `outputOffset`. Already-buffered text can return without waiting for a new event; otherwise the call waits for new progress or completion. Retain your offset when no page is returned. `hasMore: false` means caught up with current output, not that the turn is finished. Running text without an explicit offset is available only in full mode.
 
@@ -131,7 +145,7 @@ If you lose the request ID, call `grok_status` with `cwd` instead:
 { "cwd": "/absolute/path/to/project" }
 ```
 
-This immediately returns `active` and `recent` lists for that exact workspace in the current MCP process. All active requests and the 10 most recently finished requests are included, with recent results ordered by completion. Entries contain request/session IDs, status, write mode, revision, and timestamps; message text and tool output are omitted. Use a returned `requestId` to read the result or cancel that request. Supply exactly one of `requestId` or `cwd`; revision and paging options require a request ID. A bridge restart clears the lists.
+This immediately returns `active` and `recent` lists for that exact workspace in the current MCP process. All active requests and the 10 most recently finished requests are included, with recent results ordered by completion. Entries contain request/session IDs, status, write mode, revision, and timestamps; message text and tool output are omitted. Use a returned `requestId` to read the result or cancel that request. Supply exactly one of `requestId` or `cwd`; revision, answer paging, and tool-history paging require a request ID. A bridge restart clears the lists.
 
 | Status | Meaning |
 | --- | --- |
@@ -156,7 +170,7 @@ Grok subagents are disabled in the bridge's child process with `GROK_SUBAGENTS=0
 The bridge reuses Grok Build authentication and account limits, without reading credential files or requiring a separate API key. `GROK_BINARY` overrides the executable; otherwise discovery checks PATH and `$GROK_HOME/bin/grok` (default `~/.grok/bin/grok`). `grok_setup` checks the binary and version; a successful chat verifies account access.
 
 - Up to four Grok processes stay available between turns. Idle sessions are released after five minutes or evicted to make room. Overlapping turns in the same resident session are rejected.
-- The current MCP process keeps up to 100 request results, evicting the oldest finished results first and preserving active requests. Full assistant text is stored in OS temporary directories (mode `0700`, files `0600`) outside the workspace, and is removed on result eviction or normal bridge shutdown. An abrupt process kill may leave temporary files for OS cleanup. If saving output fails, the turn fails and requests cancellation instead of silently losing its ending. After a restart, use the session ID to continue; old request IDs and pagination are no longer available.
+- The current MCP process keeps up to 100 request results, evicting the oldest finished results first and preserving active requests. Full assistant text and sanitized tool-state history are stored in OS temporary directories (mode `0700`, files `0600`) outside the workspace, and are removed on result eviction or normal bridge shutdown. An abrupt process kill may leave temporary files for OS cleanup. If saving output or history fails, the turn fails and requests cancellation instead of silently losing that data. After a restart, use the session ID to continue; old request IDs and pagination are no longer available.
 - Each turn has a one-hour ceiling. Cancellation uses ACP first, then terminates the process if it has not stopped within five seconds. Shutdown also cleans up descendants in Grok's process group, with a two-second grace period before forceful termination.
 - Host transcripts are not imported, credentials are not copied, and the bridge opens no network listener. Recursive bridge launches through Grok's MCP discovery are blocked.
 

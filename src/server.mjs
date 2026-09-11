@@ -14,7 +14,7 @@ if (process.env.GROK_ALLY_ACTIVE === '1') {
 const bridge = new Bridge();
 const server = new McpServer({ name: 'grok-ally', version: pkg.version });
 const waitSeconds = z.number().int().min(0).max(60).default(25);
-const detail = z.enum(['compact', 'full']).default('compact').describe('Compact status by default; full adds workspace metadata, tool history, and running text.');
+const detail = z.enum(['compact', 'full']).default('compact').describe('Compact status by default; full adds workspace metadata, the recent tool list, and running text.');
 const requestId = z.string().uuid();
 const result = data => ({ content: [{ type: 'text', text: JSON.stringify(data) }],
   structuredContent: data, isError: data.status === 'failed' || data.status === 'incomplete' });
@@ -39,23 +39,30 @@ server.registerTool('grok_chat', {
 }, handle((input, extra) => bridge.wait(bridge.start(input), input.waitSeconds, extra, true, { detail: input.detail })));
 
 server.registerTool('grok_status', {
-  description: 'Wait for a turn to finish (default 25s), then return its answer. Running replies are compact; use detail=full for diagnostics or afterRevision for early progress returns. Page long answers with outputOffset. Use cwd instead of requestId to find active/recent requests. Results expire when this MCP process exits.',
+  description: 'Wait for a turn to finish (default 25s), then return its answer. Ordinary waits omit afterRevision; that cursor wakes on progress and can increase polling. Compact replies include toolSummary.state (active|unconfirmed|confirmed). Page answers with outputOffset or outputLimit (limit alone starts at 0). Page sanitized tool history with toolOffset/toolLimit. Use cwd instead of requestId to find requests. Results expire when this MCP process exits.',
   inputSchema: z.object({ requestId: requestId.optional(),
     cwd: z.string().min(1).optional().describe('Absolute workspace path. Use instead of requestId to find requests.'),
     waitSeconds,
     detail,
     afterRevision: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional().describe('Opt into progress-triggered returns using the last revision; omit to wait for completion.'),
     outputOffset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional().describe('Read full text from UTF-8 byte offset 0, then output.nextOffset while hasMore. Pages return immediately.'),
-    outputLimit: z.number().int().min(4).max(64000).optional().describe('Page size in UTF-8 bytes; default 16000. Use with outputOffset.'),
+    outputLimit: z.number().int().min(4).max(64000).optional().describe('Page size in UTF-8 bytes; default 16000. Alone, starts at outputOffset 0.'),
+    toolOffset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional().describe('Read sanitized tool-state history from this stable record cursor. Pages return immediately.'),
+    toolLimit: z.number().int().min(1).max(100).optional().describe('History page size; default 20, max 100. Pages also stop at 16000 UTF-8 bytes. Alone, starts at toolOffset 0. Do not mix with output paging.'),
   }).strict(),
   annotations: { readOnlyHint: true, openWorldHint: false },
 }, handle((input, extra) => {
   if (Boolean(input.requestId) === Boolean(input.cwd)) throw new Error('Pass either requestId or cwd, not both.');
-  if (input.cwd && (input.afterRevision !== undefined || input.outputOffset !== undefined || input.outputLimit !== undefined)) {
-    throw new Error('afterRevision and output paging require requestId.');
+  const outputPaging = input.outputOffset !== undefined || input.outputLimit !== undefined;
+  const toolPaging = input.toolOffset !== undefined || input.toolLimit !== undefined;
+  if (input.cwd && (input.afterRevision !== undefined || outputPaging || toolPaging)) {
+    throw new Error('afterRevision and paging require requestId.');
   }
-  if (input.outputLimit !== undefined && input.outputOffset === undefined) throw new Error('outputLimit requires outputOffset.');
-  return input.requestId ? bridge.wait(bridge.get(input.requestId), input.waitSeconds, extra, false, input) : bridge.list(input.cwd);
+  if (outputPaging && toolPaging) throw new Error('Pass either output paging or tool history paging, not both.');
+  const query = { ...input };
+  if (query.outputLimit !== undefined && query.outputOffset === undefined) query.outputOffset = 0;
+  if (query.toolLimit !== undefined && query.toolOffset === undefined) query.toolOffset = 0;
+  return input.requestId ? bridge.wait(bridge.get(input.requestId), input.waitSeconds, extra, false, query) : bridge.list(input.cwd);
 }));
 
 server.registerTool('grok_cancel', {

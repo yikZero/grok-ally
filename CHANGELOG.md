@@ -2,6 +2,23 @@
 
 Notable changes for users. Each release uses the notes below.
 
+## [0.7.0] - 2026-09-11
+
+Clarify observed tool outcomes and keep their history available on request.
+
+### Added
+
+- Compact status now distinguishes Grok's turn from whether observed tools are still active, unconfirmed, or all terminal, including failures.
+- Failed tools keep a short sanitized reason when Grok provided one, and complete sanitized history is pageable after recent-list eviction.
+
+### Fixed
+
+- `outputLimit` without `outputOffset` now starts at offset 0.
+
+### Changed
+
+- Clarify polling guidance: ordinary waits target completion; `afterRevision` opts into early progress returns.
+
 ## [0.6.0] - 2026-09-05
 
 Spend less context following Grok tasks.

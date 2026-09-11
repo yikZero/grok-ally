@@ -56,6 +56,33 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
       chunk(params.sessionId, 'All done.');
       return reply(id, { stopReason: 'end_turn' });
     }
+    if (text === 'failed-evicted') {
+      const tool = update => send({ method: 'session/update', params: { sessionId: params.sessionId, update } });
+      tool({ sessionUpdate: 'tool_call', toolCallId: 'boom', title: 'Compile', status: 'in_progress',
+        rawInput: { token: 'SECRET_INPUT' } });
+      tool({ sessionUpdate: 'tool_call_update', toolCallId: 'boom', status: 'failed',
+        content: [{ type: 'content', content: { type: 'text', text: 'exit 1: missing file\u0007 Bearer fake-secret' } }],
+        rawOutput: { log: 'SECRET_OUTPUT', stack: 'x'.repeat(5000) } });
+      for (let i = 0; i < 110; i++) {
+        tool({ sessionUpdate: 'tool_call', toolCallId: `ok-${i}`, title: `Read ${i}`, status: 'in_progress' });
+        tool({ sessionUpdate: 'tool_call_update', toolCallId: `ok-${i}`, status: 'completed',
+          rawOutput: { ok: true, secret: 'SECRET_OUTPUT' } });
+      }
+      send({ method: 'session/update', params: { sessionId: params.sessionId,
+        update: { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'PRIVATE THOUGHT' } } } });
+      chunk(params.sessionId, 'Finished despite a failed compile.');
+      return reply(id, { stopReason: 'end_turn' });
+    }
+    if (text === 'failed-then-recovered') {
+      const tool = update => send({ method: 'session/update', params: { sessionId: params.sessionId, update } });
+      tool({ sessionUpdate: 'tool_call', toolCallId: 'build', title: 'Build', status: 'in_progress' });
+      tool({ sessionUpdate: 'tool_call_update', toolCallId: 'build', status: 'failed',
+        content: [{ type: 'content', content: { type: 'text', text: 'compiler error: missing header' } }] });
+      tool({ sessionUpdate: 'tool_call_update', toolCallId: 'build', status: 'in_progress' });
+      tool({ sessionUpdate: 'tool_call_update', toolCallId: 'build', status: 'completed' });
+      chunk(params.sessionId, 'Rebuilt.');
+      return reply(id, { stopReason: 'end_turn' });
+    }
     if (text === 'unicode-output') {
       for (let i = 0; i < 40; i++) chunk(params.sessionId, `第${i}段🙂` + '正文'.repeat(1000));
       chunk(params.sessionId, '\n最终结论：全部通过。');

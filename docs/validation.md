@@ -1,6 +1,14 @@
 # Validation
 
-Validation date: 2026-09-05. Local machine: macOS arm64, Node 22.14.0. Grok Build: `1.0.13 (5e9a58528b76)`.
+Latest validation: 2026-09-11, macOS arm64, Node 22.14.0, Grok Build `1.0.25 (f7e67d6988e2)`. Earlier release checks below used Grok Build `1.0.13 (5e9a58528b76)` on 2026-09-05.
+
+## Version 0.7.0 field feedback
+
+All 26 tests passed in an independent host run. Coverage includes limit-only answer paging, explicit tool confirmation state, failure details surviving recent-list eviction, unknown recovery after unrelated success, private history cleanup, and storage failures. Review reproduced and fixed three additional cases: oversized Unicode history pages, active tools left over after a finalization write error, and a repeated failed update clearing its known reason. History pages stay within 16,000 UTF-8 bytes for metadata and records; a 23-record independent fixture reconstructed exactly.
+
+A real two-turn conversation deliberately read a missing file, then an existing fixture. Compact status exposed the missing-file reason and kept recovery unknown after the successful read. Limit-only answer and history pages worked, and the second turn recalled the conversation marker and fixture total without tools. Both turns completed. The tested runtime and the generated Codex/Claude runtimes had identical SHA-256 hashes. These live checks use the official MCP client; they do not claim a Claude Code UI session was tested.
+
+The same `scripts/measure-responses.mjs` fixture used 1,332 rather than 1,224 `o200k_base` tokens across 12 running replies: nine extra tokens per reply for confirmation state and history count. Unchanged replies and answer-page payloads were identical, and all 184,025 answer bytes were preserved. These counts cover one serialized text result, excluding schemas, request arguments, and host overhead; they are not billing or subscription-quota measurements.
 
 ## Version 0.6.0 response efficiency
 

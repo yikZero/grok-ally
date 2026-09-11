@@ -19,9 +19,11 @@ async function fixture(t, previous) {
   const cwd = previous?.cwd || mkdtempSync(path.join(tmpdir(), 'grok ally '));
   if (!previous) t.after(() => rmSync(cwd, { recursive: true, force: true }));
   const log = path.join(cwd, 'events.jsonl');
+  const env = { ...process.env, GROK_BINARY: fake, GROK_TEST_LOG: log, GROK_SUBAGENTS: '1' };
+  delete env.GROK_ALLY_ACTIVE;
   const transport = new StdioClientTransport({ command: process.execPath,
     args: [path.join(root, 'plugins/grok-ally/dist/server.mjs')],
-    env: { ...process.env, GROK_BINARY: fake, GROK_TEST_LOG: log, GROK_SUBAGENTS: '1' }, stderr: 'pipe', cwd });
+    env, stderr: 'pipe', cwd });
   let stderr = '';
   transport.stderr?.on('data', data => { stderr += data; });
   const client = new Client({ name: 'bridge-test', version: '1' });
@@ -236,7 +238,9 @@ test('long tool histories retain recent actions and disclose unconfirmed complet
   const f = await fixture(t);
   const result = await f.chat({ prompt: 'many-tools' });
   assert.equal(result.status, 'completed');
-  assert.deepEqual(result.toolSummary, { total: 132, failed: 13, unconfirmed: 1, active: 0, unfinished: 1, dropped: 31 });
+  assert.deepEqual(result.toolSummary, { total: 132, failed: 13, unconfirmed: 1, active: 0, unfinished: 1, dropped: 31,
+    state: 'unconfirmed', historyRecords: 264 });
+  assert.equal(result.unconfirmedTools, undefined);
   assert.equal(result.tools.length, 101);
   assert.ok(result.tools.some(t => t.id === 'tool-129'));
   assert.equal(result.tools.find(t => t.id === 'held').status, 'completed');
@@ -275,8 +279,14 @@ test('full Unicode output pages reconstruct every chunk and final answer over MC
   assert.equal((await read({ outputOffset: offset })).structuredContent.text, '');
   assert.equal((await read({ outputOffset: 1 })).isError, true);
   assert.equal((await read({ outputOffset: offset + 1 })).isError, true);
-  assert.equal((await read({ outputLimit: 50 })).isError, true);
+  const limited = (await read({ outputLimit: 50 })).structuredContent;
+  assert.equal(limited.output.offset, 0);
+  assert.ok(Buffer.byteLength(limited.text) <= 50);
+  assert.equal(expected.startsWith(limited.text), true);
+  assert.equal(limited.output.hasMore, true);
   assert.equal((await f.call('grok_status', { cwd: f.cwd, afterRevision: 0 })).isError, true);
+  assert.equal((await f.call('grok_status', { cwd: f.cwd, outputLimit: 50 })).isError, true);
+  assert.equal((await f.call('grok_status', { cwd: f.cwd, toolLimit: 20 })).isError, true);
   const unchanged = (await read({ afterRevision: result.revision, waitSeconds: 60 })).structuredContent;
   assert.equal(unchanged.changed, false);
   assert.equal(unchanged.text, undefined);
@@ -324,6 +334,10 @@ test('compact answers and pages preserve all text without repeating diagnostic h
   assert.equal(result.tools, undefined);
   assert.equal(result.toolSummary.total, 132);
   assert.equal(result.toolSummary.unconfirmed, 1);
+  assert.equal(result.toolSummary.state, 'unconfirmed');
+  assert.equal(result.unconfirmedTools.length, 1);
+  assert.equal(result.unconfirmedTools[0].id, 'unclosed');
+  assert.equal(result.unconfirmedTools[0].reportedStatus, 'in_progress');
   const full = (await f.call('grok_status', { requestId: result.requestId, detail: 'full' })).structuredContent;
   assert.equal(full.tools.length, 101);
   const page = (await f.call('grok_status', { requestId: result.requestId, outputOffset: 0, detail: 'compact' })).structuredContent;
@@ -335,4 +349,71 @@ test('compact answers and pages preserve all text without repeating diagnostic h
   assert.equal(failed.status, 'failed');
   assert.ok(failed.error);
   assert.doesNotMatch(failed.error, /fake-secret/);
+});
+
+test('outputLimit-only, completed vs unconfirmed, preserved failure history, and stable tool pages', async t => {
+  const f = await fixture(t);
+  const leaked = /fake-secret|SECRET_INPUT|SECRET_OUTPUT|PRIVATE THOUGHT|\u0007/;
+  const evicted = await f.chat({ prompt: 'failed-evicted', detail: 'compact' });
+  assert.equal(evicted.status, 'completed');
+  assert.equal(evicted.stopReason, 'end_turn');
+  assert.equal(evicted.error, undefined);
+  assert.equal(evicted.toolSummary.state, 'confirmed');
+  assert.equal(evicted.toolSummary.failed, 1);
+  assert.equal(evicted.toolSummary.unconfirmed, 0);
+  assert.equal(evicted.toolSummary.dropped, 11);
+  assert.equal(evicted.toolSummary.historyRecords, 222);
+  assert.equal(evicted.latestFailure.id, 'boom');
+  assert.equal(evicted.latestFailure.title, 'Compile');
+  assert.equal(evicted.latestFailure.recovery, 'unknown');
+  assert.match(evicted.latestFailure.reason, /exit 1: missing file/);
+  assert.doesNotMatch(evicted.latestFailure.reason, leaked);
+  assert.ok(evicted.latestFailure.reason.length <= 240);
+  assert.equal(evicted.unconfirmedTools, undefined);
+  const limited = (await f.call('grok_status', { requestId: evicted.requestId, outputLimit: 16 })).structuredContent;
+  assert.equal(limited.output.offset, 0);
+  assert.ok(Buffer.byteLength(limited.text) <= 16);
+  assert.equal(evicted.text.startsWith(limited.text), true);
+  const full = (await f.call('grok_status', { requestId: evicted.requestId, detail: 'full' })).structuredContent;
+  assert.equal(full.tools.some(tool => tool.id === 'boom'), false);
+  assert.equal(full.latestFailure.id, 'boom');
+  assert.doesNotMatch(JSON.stringify(full), leaked);
+
+  const first = (await f.call('grok_status', { requestId: evicted.requestId, toolLimit: 20 })).structuredContent;
+  assert.equal(first.text, undefined);
+  assert.equal(first.tools, undefined);
+  assert.equal(first.toolSummary, undefined);
+  assert.equal(first.latestFailure, undefined);
+  assert.equal(first.toolHistory.offset, 0);
+  assert.equal(first.toolHistory.nextOffset, 20);
+  assert.equal(first.toolHistory.totalRecords, 222);
+  assert.equal(first.toolHistory.hasMore, true);
+  assert.equal(first.toolHistory.records.length, 20);
+  assert.equal(first.toolHistory.records[0].record, 0);
+  assert.equal(first.toolHistory.records[0].id, 'boom');
+  assert.equal(first.toolHistory.records[1].status, 'failed');
+  assert.match(first.toolHistory.records[1].reason, /exit 1: missing file/);
+  assert.equal(first.toolHistory.records.every((record, i) => record.record === i), true);
+  const again = (await f.call('grok_status', { requestId: evicted.requestId, toolOffset: 0, toolLimit: 20 })).structuredContent;
+  assert.deepEqual(again.toolHistory, first.toolHistory);
+  const next = (await f.call('grok_status', { requestId: evicted.requestId, toolOffset: first.toolHistory.nextOffset })).structuredContent;
+  assert.equal(next.toolHistory.offset, 20);
+  assert.equal(next.toolHistory.records[0].record, 20);
+  assert.notEqual(next.toolHistory.records[0].id, first.toolHistory.records[0].id);
+  assert.ok(Buffer.byteLength(JSON.stringify(first.toolHistory)) <= 16000);
+  assert.ok(Buffer.byteLength(JSON.stringify(first)) < 20000);
+  assert.doesNotMatch(JSON.stringify(first), leaked);
+  assert.equal(JSON.stringify(first).includes('rawInput'), false);
+  assert.equal(JSON.stringify(first).includes('rawOutput'), false);
+  assert.equal((await f.call('grok_status', {
+    requestId: evicted.requestId, outputOffset: 0, toolOffset: 0,
+  })).isError, true);
+  assert.equal((await f.call('grok_status', { requestId: evicted.requestId, toolOffset: 223 })).isError, true);
+
+  const recovered = await f.chat({ prompt: 'failed-then-recovered', detail: 'compact' });
+  assert.equal(recovered.status, 'completed');
+  assert.equal(recovered.toolSummary.state, 'confirmed');
+  assert.equal(recovered.latestFailure.id, 'build');
+  assert.equal(recovered.latestFailure.recovery, 'completed');
+  assert.match(recovered.latestFailure.reason, /missing header/);
 });
