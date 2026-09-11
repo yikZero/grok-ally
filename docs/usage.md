@@ -115,15 +115,29 @@ If Grok ends a turn without finishing a tool, that tool becomes `unconfirmed` an
 
 When a tool reports `failed`, compact replies include `latestFailure` with `id`, `title`, `recovery`, and a short sanitized `reason` only when Grok provided text in that failure's `content`. Reasons are clipped to about 240 characters with control characters and known credential patterns removed; raw tool input/output and thoughts are not retained. The snapshot is kept even after the tool leaves the recent view. `recovery` stays `unknown` unless that same tool ID later reports `completed`. Another tool succeeding, or the turn reaching `end_turn`, is not treated as recovery. A historical failed attempt is not a turn `error`.
 
+### Inspect current tool outcomes
+
+To see each retained tool's latest status, request a full snapshot without `afterRevision` or paging parameters:
+
+```json
+{ "requestId": "<returned UUID>", "detail": "full", "waitSeconds": 0 }
+```
+
+The `tools` array is already merged by tool ID. For example, three tools with ten history events return three tool entries. While the turn runs these are current states; after it ends they are the latest reported outcomes, with missing outcomes marked `unconfirmed`. This uses the recent-list retention limits above. Read history only when you need earlier transitions or tools that have left that list.
+
 ### Read a complete answer
 
-Terminal `text` is a recent preview of up to **16,000 UTF-8 bytes**, so long replies retain their ending. `truncated: true` means that this response contains only part of the retained answer. Read earlier text when the question needs it; fetch every page when the full answer is required:
+Terminal `text` is a recent preview of up to **16,000 UTF-8 bytes**, so long replies retain their ending. The retained text includes assistant updates from throughout the turn, not just its final conclusion. `truncated: true` means that this response contains only part of the retained text. Read earlier text when the question needs it; fetch every page when the full answer is required:
 
 ```json
 { "requestId": "<returned UUID>", "outputOffset": 0, "outputLimit": 16000 }
 ```
 
 `outputLimit` without `outputOffset` starts at 0. Append each page's `text` and continue from its `output.nextOffset` while `output.hasMore` is true. Compact pages contain the answer and paging metadata without repeated tool history. Offsets are UTF-8 bytes, not JavaScript character counts. Returned offsets preserve character boundaries. Pages accept 4–64,000 bytes and return immediately when requested without `afterRevision`. After a turn is terminal, its text and offsets stay fixed until the result is evicted or the bridge exits.
+
+The last page can report both `truncated: true` and `output.hasMore: false`: it omits earlier text, but there is nothing after this page. For a finished turn, stop paging on `output.hasMore: false`; do not wait for `truncated` to become false. Reading only the last page does not mean you have retrieved the earlier pages.
+
+For incremental text while a turn runs, start at `outputOffset: 0`, then combine `afterRevision` with the last `output.nextOffset` as `outputOffset`. Already-buffered text can return without waiting for a new event; otherwise the call waits for new progress or completion. Retain your offset when no page is returned. `hasMore: false` means caught up with current output, not that the turn is finished. Running text without an explicit offset is available only in full mode.
 
 ### Read tool history
 
@@ -134,8 +148,6 @@ Sanitized tool-state snapshots (status and metadata changes, including final `un
 ```
 
 Continue from `toolHistory.nextOffset` while `toolHistory.hasMore` is true. A page may contain fewer than `toolLimit` records when the byte cap is reached; the cursor still advances. History pages return immediately and omit the answer and recent-tool list. Do not mix `outputOffset`/`outputLimit` with `toolOffset`/`toolLimit`. Records never include raw tool input/output or thoughts. A storage failure fails the turn instead of silently dropping history. Files are removed on result eviction or normal bridge shutdown.
-
-For incremental text while a turn runs, start at `outputOffset: 0`, then combine `afterRevision` with the last `output.nextOffset` as `outputOffset`. Already-buffered text can return without waiting for a new event; otherwise the call waits for new progress or completion. Retain your offset when no page is returned. `hasMore: false` means caught up with current output, not that the turn is finished. Running text without an explicit offset is available only in full mode.
 
 ### Recover a request
 
