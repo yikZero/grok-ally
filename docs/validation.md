@@ -1,6 +1,14 @@
 # Validation
 
-Latest validation: 2026-09-11, macOS arm64, Node 22.14.0, Grok Build `1.0.25 (f7e67d6988e2)`. Earlier release checks below used Grok Build `1.0.13 (5e9a58528b76)` on 2026-09-05.
+Latest validation: 2026-09-15, macOS arm64, Node 22.14.0, Grok Build `1.0.30 (04b7ffed98c6)`. Version 0.7.0 was checked with Grok Build `1.0.25 (f7e67d6988e2)`; earlier releases used `1.0.13 (5e9a58528b76)`.
+
+## Version 0.8.0 cancellation cleanup
+
+All 45 tests passed in an independent host run, with no skips. Process checks cover separate background groups, children that ignore SIGTERM, bounded cancellation and session-close waits, unexpected Grok exit, startup cancellation, session reload, and unrelated processes surviving cleanup. Synthetic process tables verify that reused process IDs do not authorize signalling unrelated groups. OS tests require process-list access and are explicitly skipped where the environment denies it; those skipped runs are not acceptance evidence.
+
+An isolated live check reproduced the 0.7.0 issue: ordinary cancellation ended the turn while a lightweight background parent and child remained alive. Native `session/close` removed them. The final 0.8.0 bundle was then tested through the official MCP client: cancellation stayed pending during cleanup, both worker processes were gone before the terminal result, no delayed marker was written, and an unrelated sibling survived. A follow-up loaded the same conversation and recalled its marker and command without tools. One ACP tool lacked a final event while local cleanup was independently confirmed, exercising the distinction between `toolSummary.state` and `cleanup.state`.
+
+These probes used small, time-limited Node workers, not a memory-intensive project build. A separate native single-task kill check succeeded; it did not reproduce the reported `tsc`-specific leak. This release does not claim that all native task-kill paths or unobserved external processes have been verified.
 
 ## Version 0.7.0 field feedback
 
@@ -60,7 +68,7 @@ The review reproduced and fixed two lifecycle issues: descendants surviving Grok
 
 ## Automated checks
 
-All twenty automated checks pass: fifteen use the official MCP client against the **bundled server**, with an independent fake ACP executable; five check bridge state and output lifecycle directly. Run them with `npm test`. Coverage includes:
+Run `npm test` for the current suite. Tests use the official MCP client against the **bundled server**, an independent fake ACP executable, direct bridge checks, and real local process fixtures. Coverage includes:
 
 - Schema errors, absolute workspace paths (including spaces/symlinks), separate conversations, explicit write mode, and one process/handshake for follow-up turns.
 - MCP restart and native session load, replay filtering, honest load failure, and reconnection after an idle child exits.

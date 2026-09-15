@@ -66,7 +66,7 @@ server.registerTool('grok_status', {
 }));
 
 server.registerTool('grok_cancel', {
-  description: 'Cancel a Grok turn through ACP. Returns cancelling until Grok stops; use grok_status to confirm. Existing edits are not rolled back.',
+  description: 'Cancel a Grok turn through ACP, then close the native session and retire the process. Returns cancelling until cleanup settles; check cleanup.state via grok_status before taking over. Existing edits are not rolled back. Follow-up with the same sessionId loads a new process.',
   inputSchema: z.object({ requestId, detail }).strict(),
   annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
 }, handle(input => bridge.cancel(input.requestId, { detail: input.detail })));

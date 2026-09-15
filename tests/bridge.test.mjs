@@ -21,6 +21,8 @@ async function fixture(t, previous) {
   const log = path.join(cwd, 'events.jsonl');
   const env = { ...process.env, GROK_BINARY: fake, GROK_TEST_LOG: log, GROK_SUBAGENTS: '1' };
   delete env.GROK_ALLY_ACTIVE;
+  delete env.GROK_TEST_NO_CLOSE;
+  delete env.GROK_TEST_SLOW_INIT;
   const transport = new StdioClientTransport({ command: process.execPath,
     args: [path.join(root, 'plugins/grok-ally/dist/server.mjs')],
     env, stderr: 'pipe', cwd });
@@ -130,8 +132,16 @@ test('slow turns return handles, reject overlapping prompts and cancel via ACP',
   const final = (await f.call('grok_status', { requestId: job.requestId })).structuredContent;
   assert.equal(final.status, 'cancelled');
   assert.equal(final.text, '回答:slow');
+  assert.equal(final.cleanup.scope, 'observed-local');
+  assert.ok(['confirmed', 'unconfirmed'].includes(final.cleanup.state));
+  if (final.cleanup.state === 'unconfirmed') assert.ok(final.cleanup.reason);
   assert.equal(f.events().filter(e => e.method === 'session/cancel').length, 1);
-  assert.equal((await f.chat({ prompt: 'after cancel', sessionId: job.sessionId })).status, 'completed');
+  assert.ok(f.events().some(e => e.method === 'session/close'));
+  const resumed = await f.chat({ prompt: 'after cancel', sessionId: job.sessionId });
+  assert.equal(resumed.status, 'completed');
+  assert.equal(resumed.sessionId, job.sessionId);
+  assert.equal(f.events().filter(e => e.event === 'spawn').length, 2);
+  assert.equal(f.events().filter(e => e.method === 'session/load').length, 1);
 });
 
 test('workspace status recovers handles, isolates projects and bounds finished results', async t => {

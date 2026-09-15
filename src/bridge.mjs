@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import { GrokSession, safeError, workspace } from './grok.mjs';
+import { CLOSE_MS, GrokSession, safeError, TERM_MS, workspace } from './grok.mjs';
 import { ToolHistory, HISTORY_PAGE } from './history.mjs';
 import { Output } from './output.mjs';
+import { isAlive, waitUntil } from './process.mjs';
 
 const RUNNING = new Set(['starting', 'running', 'cancelling']);
 const ACTIVE_TOOL = new Set(['pending', 'in_progress']);
@@ -29,17 +30,21 @@ function fingerprint(tool) {
 }
 
 export class Bridge {
-  constructor({ Session = GrokSession, idleMs = 300000, turnMs = 3600000, cancelMs = 5000 } = {}) {
-    Object.assign(this, { Session, idleMs, turnMs, cancelMs });
+  constructor({ Session = GrokSession, idleMs = 300000, turnMs = 3600000, closeMs = CLOSE_MS, termMs = TERM_MS } = {}) {
+    Object.assign(this, { Session, idleMs, turnMs, closeMs, termMs });
     // ponytail: leases are process-local; add disk leases before concurrent hosts may prompt the same session.
     this.sessions = new Set();
     this.jobs = new Map();
+    this.retiring = new Set();
   }
 
   start(input) {
     const options = { ...input, cwd: workspace(input.cwd) };
     if (options.sessionId && (options.model || options.effort)) {
       throw new Error('model and effort apply only to a new session; omit them when continuing.');
+    }
+    if (options.sessionId && this.retiring.has(options.sessionId)) {
+      throw new Error('This session already has an active turn. Wait or cancel it first.');
     }
     let session = [...this.sessions].find(s => s.sessionId === options.sessionId && options.sessionId);
     if (session && !session.busy && session.connection?.signal.aborted) {
@@ -86,22 +91,45 @@ export class Bridge {
       if (!session.ready) {
         job.sessionId = await session.initialize();
         session.ready = true;
+        if (job.status === 'cancelling' && job.sessionId) this.retiring.add(job.sessionId);
       }
-      if (job.status === 'cancelling') { job.status = 'cancelled'; return; }
+      if (job.status === 'cancelling') {
+        await job.cleanupDone;
+        job.status = job.error ? 'failed' : 'cancelled';
+        return;
+      }
       job.status = 'running';
       this.touch(job);
       const result = await session.prompt(prompt);
       job.stopReason = result.stopReason;
-      job.status = job.error ? 'failed' : job.status === 'cancelling' || result.stopReason === 'cancelled'
-        ? 'cancelled' : result.stopReason === 'end_turn' ? 'completed' : 'incomplete';
+      if (job.cleanupDone) {
+        await job.cleanupDone;
+        job.status = job.error ? 'failed' : 'cancelled';
+        return;
+      }
+      if (result.stopReason === 'cancelled') {
+        this.beginCleanup(job);
+        await job.cleanupDone;
+        job.status = job.error ? 'failed' : 'cancelled';
+        return;
+      }
+      job.status = job.error ? 'failed' : result.stopReason === 'end_turn' ? 'completed' : 'incomplete';
     } catch (error) {
-      const cancelled = job.status === 'cancelling';
-      job.status = cancelled && !job.error ? 'cancelled' : 'failed';
-      if (!cancelled) job.error = safeError(error);
+      if (job.cleanupDone) {
+        await job.cleanupDone;
+        job.status = job.error ? 'failed' : 'cancelled';
+        return;
+      }
+      job.status = 'failed';
+      job.error = safeError(error);
       this.drop(session);
     } finally {
       clearTimeout(timeout);
-      clearTimeout(job.cancelTimer);
+      if (job.status === 'cancelling' && job.cleanupDone) {
+        await job.cleanupDone;
+        if (job.status === 'cancelling') job.status = job.error ? 'failed' : 'cancelled';
+      }
+      if (job.sessionId) this.retiring.delete(job.sessionId);
       job.finishedAt = now();
       // A terminal prompt does not prove that a missing tool completion succeeded.
       const pending = [];
@@ -255,6 +283,13 @@ export class Bridge {
       revision: job.revision, changed,
       ...(job.stopReason ? { stopReason: job.stopReason } : {}),
       ...(job.error ? { error: job.error } : {}) };
+    if (job.cleanup && (!compact || changed) && !toolPaging) {
+      data.cleanup = {
+        state: job.cleanup.state, scope: job.cleanup.scope,
+        ...(job.cleanup.reason ? { reason: job.cleanup.reason } : {}),
+        ...(job.cleanup.remaining?.length ? { remaining: job.cleanup.remaining } : {}),
+      };
+    }
     if (toolPaging) return Object.assign(data, job.history.page(toolOffset, toolLimit ?? HISTORY_PAGE));
     const duration = started => Math.max(0, Date.parse(job.finishedAt || now()) - Date.parse(started));
     if (!compact) Object.assign(data, { cwd: job.cwd, write: job.write, createdAt: job.createdAt,
@@ -346,14 +381,76 @@ export class Bridge {
 
   cancel(id, query) {
     const job = this.get(id);
-    if (RUNNING.has(job.status) && job.status !== 'cancelling') {
-      job.status = 'cancelling';
-      this.touch(job, false);
-      if (job.session.sessionId) void job.session.cancel().catch(() => this.drop(job.session));
-      else this.drop(job.session);
-      job.cancelTimer = setTimeout(() => this.drop(job.session), this.cancelMs);
-    }
+    if (RUNNING.has(job.status) && job.status !== 'cancelling') this.beginCleanup(job);
     return this.snapshot(job, query);
+  }
+
+  beginCleanup(job) {
+    if (job.cleanupDone) return;
+    job.status = 'cancelling';
+    job.cleanup = { state: 'pending', scope: 'observed-local' };
+    if (job.session.sessionId) this.retiring.add(job.session.sessionId);
+    this.touch(job, false);
+    job.cleanupDone = this.retire(job);
+  }
+
+  async bound(promise, ms) {
+    if (promise == null) return;
+    let timer;
+    try {
+      await Promise.race([
+        Promise.resolve(promise).catch(() => {}),
+        new Promise(resolve => { timer = setTimeout(resolve, ms); }),
+      ]);
+    } finally { clearTimeout(timer); }
+  }
+
+  async retire(job) {
+    const session = job.session;
+    const sessionId = session.sessionId || job.sessionId;
+    if (sessionId) this.retiring.add(sessionId);
+    try {
+      session.snapshotOwned?.();
+      if (session.sessionId) await this.bound(session.cancel?.(), this.closeMs);
+      await this.bound(session.closeSession?.(), this.closeMs);
+      session.snapshotOwned?.();
+      clearTimeout(session.idleTimer);
+      session.close();
+      const leftover = await this.waitGone(session);
+      this.sessions.delete(session);
+      job.cleanup = this.cleanupResult(session, leftover);
+    } catch (error) {
+      this.drop(session);
+      job.cleanup = { state: 'unconfirmed', scope: 'observed-local', reason: clip(safeError(error), 240) };
+    }
+    this.touch(job, false);
+  }
+
+  async waitGone(session) {
+    const budget = this.termMs + TERM_MS;
+    if (typeof session.remainingOwned !== 'function' && !session.child?.pid) return [];
+    if (session.listUnknown || session.treeCleanup === false) {
+      await waitUntil(() => !session.child?.pid || !isAlive(session.child.pid), budget);
+      return [];
+    }
+    if (!session.child?.pid) return session.remainingOwned?.() ?? [];
+    await waitUntil(() => session.remainingOwned().length === 0 && !isAlive(session.child?.pid), budget);
+    return session.remainingOwned?.() ?? [];
+  }
+
+  cleanupResult(session, leftover) {
+    if (session?.treeCleanup === false || process.platform === 'win32') {
+      return { state: 'unconfirmed', scope: 'observed-local',
+        reason: 'Process tree cleanup is not supported on this platform.' };
+    }
+    if (session?.listUnknown) {
+      return { state: 'unconfirmed', scope: 'observed-local', reason: session.listUnknown };
+    }
+    if (leftover.length) {
+      return { state: 'unconfirmed', scope: 'observed-local',
+        remaining: leftover.slice(0, 8).map(item => ({ pid: item.pid, reason: item.reason || 'still running' })) };
+    }
+    return { state: 'confirmed', scope: 'observed-local' };
   }
 
   drop(session) {

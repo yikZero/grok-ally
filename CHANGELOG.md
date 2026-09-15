@@ -2,6 +2,23 @@
 
 Notable changes for users. Each release uses the notes below.
 
+## [0.8.0] - 2026-09-15
+
+Cancel background work and report local process cleanup separately from tool outcomes.
+
+### Fixed
+
+- Cancellation now closes the native Grok session and retires its process, preventing a prompt cancellation acknowledgement from leaving background commands running.
+- Bound native shutdown waits and clean up verified local descendants, including separate background process groups.
+
+### Added
+
+- Cancellation replies include `cleanup.state`: `pending`, `confirmed`, or `unconfirmed`, with a short reason or remaining process IDs when available. Confirmation covers observed local processes.
+
+### Changed
+
+- Cancelled sessions stop their background work. The turn stays `cancelling` until cleanup settles; continuing with the same `sessionId` loads the conversation into a new process.
+
 ## [0.7.0] - 2026-09-11
 
 Clarify observed tool outcomes and keep their history available on request.

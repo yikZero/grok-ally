@@ -16,12 +16,42 @@ const effort = process.argv.includes('--reasoning-effort') && argument('--reason
 const chunk = (sessionId, text) => send({ method: 'session/update', params: {
   sessionId, update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } },
 } });
+const spawned = [];
 let active;
+let closeHang = false;
+let closeNoop = false;
+let closeDelay = 0;
+let delaySpawn = false;
+
+function spawnTree({ detached = false, stubborn = false } = {}) {
+  const ignore = stubborn ? 'process.on("SIGTERM",()=>{});' : '';
+  const leaf = `${ignore}if(process.send)process.send({pid:process.pid});setInterval(()=>{},1000);`;
+  const code = `${ignore}const {spawn}=require("child_process");const g=spawn(process.execPath,["-e",${JSON.stringify(leaf)}],{stdio:["ignore","ignore","ignore","ipc"]});g.once("message",msg=>{if(process.send)process.send({pid:process.pid,grandchild:msg.pid});});setInterval(()=>{},1000);`;
+  const child = spawn(process.execPath, ['-e', code], {
+    detached, stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+  });
+  spawned.push(child);
+  child.once('message', msg => {
+    log({ event: 'descendant', pid: child.pid, grandchild: msg.grandchild, detached, stubborn });
+  });
+  if (detached) child.unref();
+  return child;
+}
+
 readline.createInterface({ input: process.stdin }).on('line', line => {
   const message = JSON.parse(line);
   const { id, method, params } = message;
   log({ method, params, result: message.result, pid: process.pid });
-  if (method === 'initialize') return reply(id, { protocolVersion: 1, agentCapabilities: { loadSession: true }, authMethods: [] });
+  if (method === 'initialize') {
+    const payload = { protocolVersion: 1, agentCapabilities: {
+      loadSession: true, sessionCapabilities: process.env.GROK_TEST_NO_CLOSE ? {} : { close: {} },
+    }, authMethods: [] };
+    if (process.env.GROK_TEST_SLOW_INIT) {
+      setTimeout(() => reply(id, payload), Number(process.env.GROK_TEST_SLOW_INIT) || 2000);
+      return;
+    }
+    return reply(id, payload);
+  }
   if (method === 'session/new' && argument('--model') === 'config-model') return reply(id, {
     sessionId: randomUUID(), configOptions: [
       { id: 'model', name: 'Model', type: 'select', currentValue: 'config-model', options: [{ value: 'config-model', name: 'Config model' }] },
@@ -38,7 +68,23 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
     return reply(id, {});
   }
   if (method === 'session/cancel') {
+    if (delaySpawn) setTimeout(() => spawnTree({ detached: true }), 80);
     if (active) { reply(active.id, { stopReason: 'cancelled' }); active = null; }
+    return;
+  }
+  if (method === 'session/close') {
+    if (closeHang) return;
+    const finish = () => {
+      if (!closeNoop) {
+        for (const child of spawned) {
+          try { if (child.pid) process.kill(child.pid, 'SIGKILL'); } catch {}
+          try { if (child.pid) process.kill(-child.pid, 'SIGKILL'); } catch {}
+        }
+      }
+      reply(id, { _meta: { 'x.ai/closeOutcome': 'closed' } });
+    };
+    if (closeDelay) setTimeout(finish, closeDelay);
+    else finish();
     return;
   }
   if (method === 'session/prompt') {
@@ -107,7 +153,48 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
     chunk(params.sessionId, text === 'huge' ? 'x'.repeat(70000) + 'FINAL_CONCLUSION' : `回答:${text}`);
     send({ method: 'session/update', params: { sessionId: params.sessionId,
       update: { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'PRIVATE THOUGHT' } } } });
+    if (text === 'self-cancel') {
+      chunk(params.sessionId, 'stopping');
+      return reply(id, { stopReason: 'cancelled' });
+    }
     if (text === 'slow') { active = { id }; return; }
+    if (text.startsWith('slow-')) {
+      if (text === 'slow-close-hang') { closeHang = true; spawnTree({ detached: false }); }
+      if (text === 'slow-close-noop') { closeNoop = true; spawnTree({ detached: true }); }
+      if (text === 'slow-delay-spawn') delaySpawn = true;
+      if (text === 'slow-false-bg') {
+        const pid = Number(process.env.GROK_TEST_FALSE_PID);
+        send({ method: 'session/update', params: { sessionId: params.sessionId, update: {
+          sessionUpdate: 'tool_call', toolCallId: 'bg-false', title: 'run', status: 'in_progress', kind: 'execute',
+        } } });
+        send({ method: 'session/update', params: { sessionId: params.sessionId, update: {
+          sessionUpdate: 'tool_call_update', toolCallId: 'bg-false', status: 'completed',
+          title: '[bg] node (falsepid)',
+          rawOutput: { type: 'BackgroundTaskStarted', pid, task_id: randomUUID(), status: 'running' },
+        } } });
+      }
+      if (text === 'slow-tree' || text === 'slow-stubborn' || text === 'slow-detached') {
+        if (text === 'slow-tree') closeDelay = 250;
+        if (text === 'slow-stubborn') closeNoop = true;
+        const child = spawnTree({
+          detached: text !== 'slow-tree', stubborn: text === 'slow-stubborn',
+        });
+        if (text === 'slow-detached') {
+          child.once('message', () => {
+            send({ method: 'session/update', params: { sessionId: params.sessionId, update: {
+              sessionUpdate: 'tool_call', toolCallId: 'bg-1', title: 'run', status: 'in_progress', kind: 'execute',
+            } } });
+            send({ method: 'session/update', params: { sessionId: params.sessionId, update: {
+              sessionUpdate: 'tool_call_update', toolCallId: 'bg-1', status: 'completed',
+              title: '[bg] node (testdetached)',
+              rawOutput: { type: 'BackgroundTaskStarted', pid: child.pid, task_id: randomUUID(), status: 'running' },
+            } } });
+          });
+        }
+      }
+      active = { id };
+      return;
+    }
     if (text.startsWith('descendant')) {
       const child = spawn(process.execPath, ['-e', "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000); process.send('ready');"],
         { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
