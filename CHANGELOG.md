@@ -2,6 +2,21 @@
 
 Notable changes for users. Each release uses the notes below.
 
+## [0.9.0] - 2026-09-18
+
+Use Cursor Agent alongside Grok Build through the same four tools.
+
+### Added
+
+- Select Cursor with `provider: "cursor"`, using `cursor-grok-4.6-xhigh` by default. Set `GROK_ALLY_PROVIDER` to choose the default backend for new conversations.
+- Continue Cursor conversations across turns, restarts, and cancellation. Responses identify the backend and verified Cursor model/mode.
+
+### Changed
+
+- Verify Cursor model and Ask/Agent mode before sending a prompt; unsupported settings fail without a fallback. Existing Grok sessions keep their backend.
+- Share progress, retained results, and observed-local process cleanup across both backends. Interactive Cursor questions and plans return to the host instead of waiting for input.
+- Document Cursor's native permission boundary and persisted model selection. Cursor mode restrictions are not equivalent to Grok's OS sandbox.
+
 ## [0.8.0] - 2026-09-15
 
 Cancel background work and report local process cleanup separately from tool outcomes.

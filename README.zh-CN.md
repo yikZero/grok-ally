@@ -1,18 +1,18 @@
 # Grok Ally
 
-在 **Codex、Claude Code 或其他本地 MCP 客户端**里与 Grok Build 交流，复用已有的 Grok 登录。支持多轮对话、恢复会话和取消请求。
+在 **Codex、Claude Code 或其他本地 MCP 客户端**里调用 Grok Build 或 Cursor Agent，使用对应服务已有的登录。支持多轮对话、恢复会话和取消请求。
 
 [English](README.md) · [使用参考](docs/usage.md) · [更新记录](CHANGELOG.md)
 
 原名 Grok Bridge。从 0.2.x 或更早版本升级，请按[迁移步骤](docs/usage.md#upgrade-from-grok-bridge)重新安装。
 
 ```text
-Codex / Claude → MCP → Grok Ally → ACP → Grok Build
+Codex / Claude → MCP → Grok Ally → ACP → Grok Build / Cursor Agent
 ```
 
 ## 安装
 
-需要 **Node.js 22+** 和已通过 `grok login` 登录的 [Grok Build](https://docs.x.ai/build/overview)。使用 macOS 或 Linux，并确保 Grok sandbox 可用；Windows 请在 WSL 中运行客户端和桥接服务。
+需要 **Node.js 22+**，以及已登录的 [Grok Build](https://docs.x.ai/build/overview)（`grok login`）或 [Cursor Agent](https://cursor.com/docs/cli/installation)（`agent login`）。只需安装实际使用的后端。支持 macOS、Linux；Windows 请在 WSL 中运行客户端和桥接服务。
 
 ### Codex
 
@@ -45,13 +45,15 @@ claude plugin install grok-ally@grok-ally
 | `grok_chat` | 开始或继续对话 |
 | `grok_status` | 跟进进度、读取完整结果，或查找最近的请求 |
 | `grok_cancel` | 取消当前请求 |
-| `grok_setup` | 检查本地 Grok 安装 |
+| `grok_setup` | 检查所选后端的安装 |
+
+使用 Cursor 时，可以说：**“通过 Cursor 调用 Grok Ally 来实现这个需求。”** 助手传入 `provider: "cursor"`，默认模型固定为 **`cursor-grok-4.6-xhigh`**。不传 `provider` 仍使用 Grok Build；也可在 MCP 服务环境中设置 `GROK_ALLY_PROVIDER=cursor`。旧会话保持原来的后端，不会因额度不足自动切换。详见[后端选择](docs/usage.md#choose-a-backend)。
 
 助手会传入项目路径，并保留会话 ID 用于追问。需要分享给 Grok 的上下文放在提示词中；插件不会自动导入 Codex 或 Claude 的聊天记录。
 
-长任务默认返回精简进度，结束后再给回答，减少轮询占用的上下文。`completed` 表示 Grok 结束了这一轮，不等于工具结果已确认或已通过独立验收。详细工具记录与全文仍可按需读取，详见[结果与取消](docs/usage.md#results-and-cancellation)及[效率测量](docs/efficiency.md)。
+长任务默认返回精简进度，结束后再给回答，减少轮询占用的上下文。`completed` 表示所选代理结束了这一轮，不等于工具结果已确认或已通过独立验收。详细工具记录与全文仍可按需读取，详见[结果与取消](docs/usage.md#results-and-cancellation)及[效率测量](docs/efficiency.md)。
 
-默认禁止修改项目，明确授权编辑时才设置 `write: true`。Grok 仍可读取项目外的文件，使用自己的工具、钩子和网络配置。更多参数与权限说明见[使用参考](docs/usage.md#permissions-and-lifecycle)。
+默认只读，明确授权编辑时才设置 `write: true`。Grok 使用 OS 沙箱；Cursor 使用经核验的 Ask / Agent 模式及原生权限规则，两者不具有相同的 OS 写入限制。各自的工具、钩子和网络配置仍然生效。更多参数与权限说明见[使用参考](docs/usage.md#permissions-and-lifecycle)。
 
 ## 开发
 
@@ -65,4 +67,4 @@ npm test
 
 [架构与源码调研](docs/architecture.md) · [验证记录](docs/validation.md) · [发布规范](docs/releasing.md)
 
-独立开源项目，与 xAI、OpenAI、Anthropic 无隶属关系。[Apache-2.0](LICENSE) · [致谢](NOTICE)。
+独立开源项目，与 xAI、Cursor、OpenAI、Anthropic 无隶属关系。[Apache-2.0](LICENSE) · [致谢](NOTICE)。

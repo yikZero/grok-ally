@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { CLOSE_MS, GrokSession, safeError, TERM_MS, workspace } from './grok.mjs';
+import { CLOSE_MS, safeError, TERM_MS, workspace } from './grok.mjs';
+import { providerFor, sessionKey, sessions } from './providers.mjs';
 import { ToolHistory, HISTORY_PAGE } from './history.mjs';
 import { Output } from './output.mjs';
 import { isAlive, waitUntil } from './process.mjs';
@@ -30,7 +31,7 @@ function fingerprint(tool) {
 }
 
 export class Bridge {
-  constructor({ Session = GrokSession, idleMs = 300000, turnMs = 3600000, closeMs = CLOSE_MS, termMs = TERM_MS } = {}) {
+  constructor({ Session, idleMs = 300000, turnMs = 3600000, closeMs = CLOSE_MS, termMs = TERM_MS } = {}) {
     Object.assign(this, { Session, idleMs, turnMs, closeMs, termMs });
     // ponytail: leases are process-local; add disk leases before concurrent hosts may prompt the same session.
     this.sessions = new Set();
@@ -39,19 +40,20 @@ export class Bridge {
   }
 
   start(input) {
-    const options = { ...input, cwd: workspace(input.cwd) };
+    const options = { ...input, provider: providerFor(input), cwd: workspace(input.cwd) };
     if (options.sessionId && (options.model || options.effort)) {
       throw new Error('model and effort apply only to a new session; omit them when continuing.');
     }
-    if (options.sessionId && this.retiring.has(options.sessionId)) {
+    if (options.sessionId && this.retiring.has(sessionKey(options.sessionId))) {
       throw new Error('This session already has an active turn. Wait or cancel it first.');
     }
-    let session = [...this.sessions].find(s => s.sessionId === options.sessionId && options.sessionId);
+    let session = [...this.sessions].find(s => options.sessionId && sessionKey(s.sessionId) === sessionKey(options.sessionId));
     if (session && !session.busy && session.connection?.signal.aborted) {
       this.drop(session);
       session = undefined;
     }
     if (session) {
+      if (session.sessionId !== options.sessionId) throw new Error('Use the original sessionId, including its model settings.');
       if (session.busy) throw new Error('This session already has an active turn. Wait or cancel it first.');
       if (session.options.cwd !== options.cwd || session.options.write !== options.write) {
         throw new Error('A live session must keep the same cwd and write settings.');
@@ -60,17 +62,18 @@ export class Bridge {
     } else {
       if (this.sessions.size >= 4) {
         const idle = [...this.sessions].find(s => !s.busy);
-        if (!idle) throw new Error('Four Grok sessions are active. Wait or cancel one first.');
+        if (!idle) throw new Error('Four sessions are active. Wait or cancel one first.');
         this.drop(idle);
       }
-      session = new this.Session(options, update => this.update(session, update));
+      const Session = this.Session || sessions[options.provider];
+      session = new Session(options, update => this.update(session, update));
       this.sessions.add(session);
     }
     for (const [id, job] of this.jobs) {
       if (this.jobs.size < 100) break;
       if (!RUNNING.has(job.status)) { this.release(job); this.jobs.delete(id); }
     }
-    const job = { requestId: randomUUID(), sessionId: session.sessionId || null, status: 'starting',
+    const job = { requestId: randomUUID(), sessionId: session.sessionId || null, status: 'starting', provider: options.provider,
       output: new Output(), history: new ToolHistory(), tools: [], toolsById: new Map(), toolFingerprints: new Map(),
       toolTotals: { total: 0, failed: 0, unconfirmed: 0 }, latestFailure: null,
       revision: 1, textRevision: 0, waiters: new Set(), session, cwd: options.cwd, write: options.write,
@@ -91,7 +94,7 @@ export class Bridge {
       if (!session.ready) {
         job.sessionId = await session.initialize();
         session.ready = true;
-        if (job.status === 'cancelling' && job.sessionId) this.retiring.add(job.sessionId);
+        if (job.status === 'cancelling' && job.sessionId) this.retiring.add(sessionKey(job.sessionId));
       }
       if (job.status === 'cancelling') {
         await job.cleanupDone;
@@ -129,7 +132,7 @@ export class Bridge {
         await job.cleanupDone;
         if (job.status === 'cancelling') job.status = job.error ? 'failed' : 'cancelled';
       }
-      if (job.sessionId) this.retiring.delete(job.sessionId);
+      if (job.sessionId) this.retiring.delete(sessionKey(job.sessionId));
       job.finishedAt = now();
       // A terminal prompt does not prove that a missing tool completion succeeded.
       const pending = [];
@@ -261,8 +264,8 @@ export class Bridge {
   list(cwd) {
     cwd = workspace(cwd);
     const jobs = [...this.jobs.values()].reverse().filter(job => job.cwd === cwd)
-      .map(({ requestId, sessionId, status, write, createdAt, finishedAt, lastProgressAt, revision }) =>
-        ({ requestId, sessionId, status, write, createdAt, finishedAt, lastProgressAt, revision }));
+      .map(({ requestId, sessionId, provider, status, write, createdAt, finishedAt, lastProgressAt, revision }) =>
+        ({ requestId, sessionId, provider, status, write, createdAt, finishedAt, lastProgressAt, revision }));
     return { cwd, active: jobs.filter(job => RUNNING.has(job.status)),
       recent: jobs.filter(job => !RUNNING.has(job.status)).slice(0, 10) };
   }
@@ -279,7 +282,8 @@ export class Bridge {
     const outputPaging = outputOffset !== undefined;
     const toolPaging = toolOffset !== undefined;
     const paging = outputPaging || toolPaging;
-    const data = { requestId: job.requestId, sessionId: job.sessionId, status: job.status,
+    const data = { requestId: job.requestId, sessionId: job.sessionId, provider: job.provider, status: job.status,
+      ...(job.session?.model ? { model: job.session.model, mode: job.session.mode } : {}),
       revision: job.revision, changed,
       ...(job.stopReason ? { stopReason: job.stopReason } : {}),
       ...(job.error ? { error: job.error } : {}) };
@@ -363,7 +367,7 @@ export class Bridge {
       const current = job.tools.find(t => ACTIVE_TOOL.has(t.status));
       void extra.sendNotification({ method: 'notifications/progress', params: {
         progressToken: token, progress: ++progress,
-        message: `Grok ${job.status} · ${job.toolTotals.total} tools · ${job.output.totalBytes} bytes`
+        message: `${job.provider} ${job.status} · ${job.toolTotals.total} tools · ${job.output.totalBytes} bytes`
           + (current ? ` · ${current.title} (${Math.max(0, Math.floor((Date.now() - Date.parse(current.startedAt)) / 1000))}s)` : ''),
       } }).catch(() => {});
     }, 1000);
@@ -388,8 +392,9 @@ export class Bridge {
   beginCleanup(job) {
     if (job.cleanupDone) return;
     job.status = 'cancelling';
+    job.session.cancelling = true;
     job.cleanup = { state: 'pending', scope: 'observed-local' };
-    if (job.session.sessionId) this.retiring.add(job.session.sessionId);
+    if (job.session.sessionId) this.retiring.add(sessionKey(job.session.sessionId));
     this.touch(job, false);
     job.cleanupDone = this.retire(job);
   }
@@ -408,7 +413,7 @@ export class Bridge {
   async retire(job) {
     const session = job.session;
     const sessionId = session.sessionId || job.sessionId;
-    if (sessionId) this.retiring.add(sessionId);
+    if (sessionId) this.retiring.add(sessionKey(sessionId));
     try {
       session.snapshotOwned?.();
       if (session.sessionId) await this.bound(session.cancel?.(), this.closeMs);

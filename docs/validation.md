@@ -1,6 +1,20 @@
 # Validation
 
-Latest validation: 2026-09-15, macOS arm64, Node 22.14.0, Grok Build `1.0.30 (04b7ffed98c6)`. Version 0.7.0 was checked with Grok Build `1.0.25 (f7e67d6988e2)`; earlier releases used `1.0.13 (5e9a58528b76)`.
+Latest validation: 2026-09-18, macOS arm64, Node 22.14.0, Cursor Agent `2026.09.08-6caf4ff`. Version 0.9.0 adds an optional Cursor ACP backend.
+
+## Version 0.9.0 Cursor integration
+
+All 51 local automated tests passed with no skips. Checks cover explicit/default routing, original Grok IDs under a Cursor default, persisted Cursor handles across MCP restart, unavailable and ignored model/mode settings, authentication failure before prompting, one-time permissions, late permissions after cancellation, interactive questions/plans, and cancellation without a native close capability. The existing Grok output, progress, history, and process-cleanup regressions remain in the same suite. Fast terminal text/tool events also catch ACP handler-ordering regressions.
+
+Live Cursor checks through the bundled MCP runtime completed a file read, context recall, read-only refusal, MCP restart and recall, and a write task with a Node assertion. The host independently checked the unchanged read-only file and ran the generated module assertion. Each reply reported `grok-4.6[effort=xhigh,fast=false]` and the expected Ask/Agent mode.
+
+A live foreground Node command wrote its PID and scheduled a file write three minutes later. Cancellation retired the Cursor process and the observed command; the host checked the PID was gone and its delayed output file absent. `cleanup.state` was confirmed while the interrupted ACP tool remained unconfirmed, correctly keeping those meanings separate. Reloading the same session then completed a follow-up.
+
+Boundary probe: Agent mode could write an explicitly authorized temporary file outside `cwd` despite `--sandbox enabled`; the host removed that file. Documentation therefore distinguishes Cursor's native mode/policies from Grok's OS workspace sandbox. Native model selection persisted in Cursor config as expected; Ally does not copy credentials or rewrite native config files.
+
+Grok's account quota was depleted, so no new live Grok conversation was accepted in this round. Grok compatibility is covered by automated regressions and the previous live checks below. These checks do not establish every Cursor version, account policy, external tool, or OS behavior.
+
+Earlier live baseline: 2026-09-15, macOS arm64, Node 22.14.0, Grok Build `1.0.30 (04b7ffed98c6)`. Version 0.7.0 was checked with Grok Build `1.0.25 (f7e67d6988e2)`; earlier releases used `1.0.13 (5e9a58528b76)`.
 
 ## Version 0.8.0 cancellation cleanup
 

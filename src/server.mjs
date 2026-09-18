@@ -3,7 +3,8 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod/v4';
 import { Bridge } from './bridge.mjs';
-import { safeError, setup } from './grok.mjs';
+import { safeError } from './common.mjs';
+import { setup } from './providers.mjs';
 import pkg from '../package.json' with { type: 'json' };
 
 if (process.env.GROK_ALLY_ACTIVE === '1') {
@@ -15,6 +16,7 @@ const bridge = new Bridge();
 const server = new McpServer({ name: 'grok-ally', version: pkg.version });
 const waitSeconds = z.number().int().min(0).max(60).default(25);
 const detail = z.enum(['compact', 'full']).default('compact').describe('Compact status by default; full adds workspace metadata, the recent tool list, and running text.');
+const provider = z.enum(['grok', 'cursor']).optional().describe('Backend for new sessions. Defaults to GROK_ALLY_PROVIDER or grok; saved sessionId selects its original backend.');
 const requestId = z.string().uuid();
 const result = data => ({ content: [{ type: 'text', text: JSON.stringify(data) }],
   structuredContent: data, isError: data.status === 'failed' || data.status === 'incomplete' });
@@ -24,13 +26,14 @@ const handle = fn => async (...args) => {
 };
 
 server.registerTool('grok_chat', {
-  description: 'Start or continue Grok Build using the real project cwd. Default read-only; write=true authorizes edits. Keep sessionId for follow-ups. Poll unfinished requests with grok_status; host chat history is not imported.',
+  description: 'Start or continue Grok Build or Cursor Agent using the real project cwd. Cursor defaults to cursor-grok-4.6-xhigh. Default read-only; write=true authorizes edits. Keep sessionId for follow-ups. Poll unfinished requests with grok_status; host chat history is not imported.',
   inputSchema: z.object({
     prompt: z.string().trim().min(1).max(100000),
     cwd: z.string().min(1),
-    sessionId: z.string().min(1).max(200).optional(),
-    write: z.boolean().default(false),
-    model: z.string().min(1).max(200).optional().describe('New sessions only. Exact model ID from grok models; omit for the native default.'),
+    provider,
+    sessionId: z.string().min(1).max(2000).optional(),
+    write: z.boolean().default(false).describe('Authorize native edits and commands. Grok uses its workspace sandbox; Cursor uses Agent mode, without an equivalent OS confinement guarantee.'),
+    model: z.string().min(1).max(200).optional().describe('New sessions only. Grok: exact grok models ID, or native default. Cursor: defaults to cursor-grok-4.6-xhigh; other choices use ACP model IDs with bracket parameters.'),
     effort: z.enum(['minimal', 'low', 'medium', 'high', 'xhigh']).optional().describe('New sessions only. Must be honored by the selected Grok model.'),
     waitSeconds,
     detail,
@@ -66,16 +69,16 @@ server.registerTool('grok_status', {
 }));
 
 server.registerTool('grok_cancel', {
-  description: 'Cancel a Grok turn through ACP, then close the native session and retire the process. Returns cancelling until cleanup settles; check cleanup.state via grok_status before taking over. Existing edits are not rolled back. Follow-up with the same sessionId loads a new process.',
+  description: 'Cancel a turn through ACP, then close the native session when supported and retire the process. Returns cancelling until cleanup settles; check cleanup.state via grok_status before taking over. Existing edits are not rolled back. Follow-up with the same sessionId loads a new process.',
   inputSchema: z.object({ requestId, detail }).strict(),
   annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
 }, handle(input => bridge.cancel(input.requestId, { detail: input.detail })));
 
 server.registerTool('grok_setup', {
-  description: 'Check the locally installed Grok Build binary and version. Does not read credentials or claim that authentication was verified.',
-  inputSchema: z.object({}).strict(),
+  description: 'Check the selected backend binary and version (provider: grok or cursor). Does not read credentials or claim that authentication was verified.',
+  inputSchema: z.object({ provider }).strict(),
   annotations: { readOnlyHint: true, openWorldHint: false },
-}, handle(setup));
+}, handle(input => setup(input)));
 
 server.server.onclose = () => bridge.close();
 process.once('SIGTERM', () => { bridge.close(); void server.close(); });

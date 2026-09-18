@@ -21,6 +21,7 @@ async function fixture(t, previous) {
   const log = path.join(cwd, 'events.jsonl');
   const env = { ...process.env, GROK_BINARY: fake, GROK_TEST_LOG: log, GROK_SUBAGENTS: '1' };
   delete env.GROK_ALLY_ACTIVE;
+  delete env.GROK_ALLY_PROVIDER;
   delete env.GROK_TEST_NO_CLOSE;
   delete env.GROK_TEST_SLOW_INIT;
   const transport = new StdioClientTransport({ command: process.execPath,
@@ -162,7 +163,7 @@ test('workspace status recovers handles, isolates projects and bounds finished r
   assert.equal(listing.recent[0].requestId, finished.requestId);
   assert.ok(listing.recent.every(job => job.sessionId === finished.sessionId));
   for (const job of [...listing.active, ...listing.recent]) {
-    assert.deepEqual(Object.keys(job).sort(), ['createdAt', 'finishedAt', 'lastProgressAt', 'requestId', 'revision', 'sessionId', 'status', 'write']);
+    assert.deepEqual(Object.keys(job).sort(), ['createdAt', 'finishedAt', 'lastProgressAt', 'provider', 'requestId', 'revision', 'sessionId', 'status', 'write']);
     assert.ok(Number.isFinite(Date.parse(job.createdAt)));
   }
   assert.equal((await f.call('grok_status', { cwd: f.cwd, requestId: active.requestId })).isError, true);
@@ -324,7 +325,7 @@ test('compact defaults keep status useful without streaming text or full tool hi
   assert.equal(full.text, '回答:slow');
   assert.equal(full.cwd, realpathSync(f.cwd));
   const unchanged = (await call('grok_status', { requestId: job.requestId, afterRevision: full.revision, waitSeconds: 0 })).structuredContent;
-  assert.deepEqual(Object.keys(unchanged).sort(), ['changed', 'requestId', 'revision', 'sessionId', 'status']);
+  assert.deepEqual(Object.keys(unchanged).sort(), ['changed', 'provider', 'requestId', 'revision', 'sessionId', 'status']);
   await call('grok_cancel', { requestId: job.requestId });
   const cancelled = (await call('grok_status', { requestId: job.requestId })).structuredContent;
   assert.equal(cancelled.status, 'cancelled');

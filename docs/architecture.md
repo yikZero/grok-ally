@@ -50,3 +50,13 @@ Reviewed OpenAI's [codex-plugin-cc](https://github.com/openai/codex-plugin-cc/tr
 | [Native runtime protocol](https://github.com/openai/codex-plugin-cc/blob/db52e28f4d9ded852ab3942cea316258ae4ef346/plugins/codex/scripts/lib/app-server.mjs#L190) | The same principle supports our MCP-to-ACP choice: reuse native sessions, configuration, and cancellation. |
 
 Its disk-backed jobs and session broker coordinate separate companion processes. Our MCP process already owns its active connections and results, so no cross-process broker is needed. Temporary output files preserve long answers without making request handles durable across restarts. Host transcript transfer and the optional stop-time review loop are separate workflows and are not enabled by this bridge. The four MCP tools cover chat/resume, status/results/discovery, cancellation, and setup; skills provide task-specific guidance.
+
+## Cursor adapter (0.9.0)
+
+The host contract remains four tools. `providers.mjs` selects the backend and protects session identity; `acp.mjs` shares transport and owned-process cleanup. `grok.mjs` and `cursor.mjs` retain native authentication, model, permission, and session configuration. Each resident conversation has a separate ACP process. Provider priority and automatic failover are deliberately outside this version.
+
+Checked [Cursor ACP documentation](https://cursor.com/docs/cli/acp), [CLI parameters](https://cursor.com/docs/cli/reference/parameters), and the locally installed `2026.09.08-6caf4ff` distribution on 2026-09-18. Its ACP `session/new` ignored CLI model/mode flags and returned High Fast / Agent. Parameterized ACP config options successfully selected `grok-4.6`, `effort=xhigh`, `fast=false`, and Ask/Agent. The adapter verifies the returned values before prompting. Cursor stores these selections in its native configuration; opaque handles retain model parameters for subsequent loads.
+
+Cursor advertises session loading but no `session/close` in this build. Cancellation sends ACP cancel and uses the shared observed-local process cleanup, with the same explicit `cleanup.state` limits. A real Agent-mode shell probe wrote a temporary file outside `cwd` despite `--sandbox enabled`; the native Ask mode is not represented as equivalent to Grok's OS sandbox. Question/plan extensions return an explicit skipped/rejected response instead of blocking or making up user choices.
+
+The ACP SDK dispatches responses separately from its asynchronous handler chain. Register session updates before request handlers so terminal tool/text notifications are processed before the prompt response retires the active turn; existing exact-output and terminal-tool regressions cover this ordering.

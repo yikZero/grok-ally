@@ -1,7 +1,7 @@
 {
   "name": "grok-ally",
-  "version": "0.8.0",
-  "description": "Talk to Grok Build from Codex, Claude Code, or any local MCP client.",
+  "version": "0.9.0",
+  "description": "Use Grok Build or Cursor Agent through a portable MCP to ACP bridge.",
   "type": "module",
   "license": "Apache-2.0",
   "author": "yikZero",

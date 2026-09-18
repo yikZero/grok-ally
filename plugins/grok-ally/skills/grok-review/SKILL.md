@@ -1,9 +1,11 @@
 ---
 name: grok-review
-description: Use when the user asks Grok to review code, check a diff, or challenge an implementation or design. Provides a read-only review through Grok Ally.
+description: Use when the user asks Grok to review code, check a diff, or challenge an implementation or design. Provides a read-only review through Grok Ally, including its Cursor backend.
 ---
 
 Use the plugin's `grok_chat` tool with `write=false`, the user's absolute project `cwd`, and no `sessionId` for a new review. This avoids continuing a write-capable conversation. Follow-up questions may reuse that review's session ID.
+
+Use `provider: "cursor"` if the user requests Cursor; it defaults to `cursor-grok-4.6-xhigh` in verified Ask mode. Otherwise use the configured backend. Keep the full session handle, and do not automatically switch providers after a failure. Cursor model choices persist in its native configuration.
 
 Identify the review target from the user's request: uncommitted changes, a named commit, a branch compared with an explicit base, or specified files/design. For uncommitted changes, include staged, unstaged, and untracked files; an empty `git diff` alone does not mean there is nothing to review. Do not invent a base branch. If the target remains ambiguous, clarify that target.
 
@@ -15,7 +17,7 @@ Put the target and requested focus in the prompt. Ask Grok to inspect relevant c
 
 For a requested design challenge or adversarial review, additionally ask Grok to examine the approach, assumptions, alternatives, and failure modes. Ordinary code review does not need that framing.
 
-For a large review, define relevant files, the main risks, and a stopping point before widening the scope. Normally wait with `grok_status`, `requestId`, and `waitSeconds=25`; omit `afterRevision` to avoid a host call for each stream update. Compact progress includes counts, current tools, and `toolSummary.state`. For an investigation, request `detail=full` and `waitSeconds=0`; use `afterRevision` only when early progress returns are needed. A long tool or unchanged revision alone does not prove a stall. If needed, cancel, wait until the request is terminal, and check `cleanup.state` before reusing the `sessionId` (a new Grok process loads it) to summarize findings or narrow the review. `cleanup.state` describes observed local process cleanup. If it is `unconfirmed`, inspect the reason and remaining processes before overlapping checks; `cancelled` alone is insufficient.
+For a large review, define relevant files, the main risks, and a stopping point before widening the scope. Normally wait with `grok_status`, `requestId`, and `waitSeconds=25`; omit `afterRevision` to avoid a host call for each stream update. Compact progress includes counts, current tools, and `toolSummary.state`. For an investigation, request `detail=full` and `waitSeconds=0`; use `afterRevision` only when early progress returns are needed. A long tool or unchanged revision alone does not prove a stall. If needed, cancel, wait until the request is terminal, and check `cleanup.state` before reusing the `sessionId` (a new native process loads it) to summarize findings or narrow the review. `cleanup.state` describes observed local process cleanup. If it is `unconfirmed`, inspect the reason and remaining processes before overlapping checks; `cancelled` alone is insufficient.
 
 For each retained tool's latest outcome, call `grok_status` with `requestId`, `detail=full`, and `waitSeconds=0`, without `afterRevision` or paging parameters. The `tools` array is already merged by ID. Read history for earlier transitions or tools removed from the recent list, rather than reconstructing ordinary outcomes from events.
 
