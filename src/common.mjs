@@ -14,4 +14,3 @@ export function safeError(error) {
     .replace(/\b(?:xai-|sk-)[\w-]+/g, '[redacted]')
     .slice(0, 2000);
 }
-
